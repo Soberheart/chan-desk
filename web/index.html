@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>缠论复盘选股台</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/echarts.min.js"></script>
+</head>
+<body>
+<header>
+  <div class="brand">缠论复盘选股台 <span class="sub">chan.py · baostock</span></div>
+  <nav id="nav">
+    <a data-page="select" class="active">选股台</a>
+    <a data-page="replay">复盘回放</a>
+    <a data-page="validate">历史验证</a>
+    <a data-page="backtest">策略回测</a>
+    <a data-page="data">数据</a>
+  </nav>
+  <div id="statusbar" class="statusbar"></div>
+</header>
+
+<main>
+<!-- 选股台 -->
+<section id="page-select" class="page active">
+  <div class="toolbar">
+    <label>日期 <input type="date" id="sel-date"></label>
+    <label>信号窗口 <select id="sel-window"><option value="1">当天</option><option value="3" selected>近3日</option><option value="5">近5日</option><option value="10">近10日</option></select></label>
+    <label>最低分 <input type="number" id="sel-min" value="60" min="0" max="100" step="5" style="width:60px"></label>
+    <div class="chips" id="sel-types"></div>
+    <div class="chips" id="sel-boards"></div>
+    <button id="sel-run" class="primary">选股</button>
+    <button id="sel-confirm">前20只做区间套确认</button>
+  </div>
+  <div class="split">
+    <div class="left">
+      <div class="hint" id="sel-hint"></div>
+      <div class="tablewrap"><table id="sel-table" class="grid"></table></div>
+    </div>
+    <div class="right">
+      <div id="sel-detail" class="detail"><div class="empty">点击左侧股票查看缠论结构与评分明细</div></div>
+      <div id="sel-chart" class="chart tall"></div>
+      <div id="sel-chart30" class="chart" style="display:none"></div>
+    </div>
+  </div>
+</section>
+
+<!-- 复盘回放 -->
+<section id="page-replay" class="page">
+  <div class="toolbar">
+    <label>股票 <input id="rp-code" list="rp-list" placeholder="代码或名称，如 600519 / 茅台" style="width:200px"></label>
+    <datalist id="rp-list"></datalist>
+    <label>从 <input type="date" id="rp-start"></label>
+    <label class="check"><input type="checkbox" id="rp-multi"> 日线+30分钟联立</label>
+    <button id="rp-go" class="primary">开始回放</button>
+    <span class="sep"></span>
+    <button id="rp-back" title="后退一根">◀</button>
+    <button id="rp-play" title="播放/暂停">▶ 播放</button>
+    <button id="rp-next" title="前进一根">▶|</button>
+    <select id="rp-speed"><option value="800">慢</option><option value="350" selected>中</option><option value="120">快</option></select>
+    <input type="range" id="rp-slider" min="1" max="1" value="1" style="flex:1;min-width:160px">
+    <span id="rp-date" class="mono"></span>
+  </div>
+  <div class="split">
+    <div class="right" style="flex:3">
+      <div id="rp-chart" class="chart tall"></div>
+      <div id="rp-chart30" class="chart" style="display:none"></div>
+    </div>
+    <div class="left" style="flex:1;max-width:360px">
+      <h4>买卖点变化日志</h4>
+      <div class="hint">实线/实心 = 已确认，虚线/空心 = 未确认（可能被后续走势改写）</div>
+      <div id="rp-log" class="log"></div>
+    </div>
+  </div>
+</section>
+
+<!-- 历史验证 -->
+<section id="page-validate" class="page">
+  <div class="toolbar">
+    <label>开始 <input type="date" id="va-start"></label>
+    <label>结束 <input type="date" id="va-end"></label>
+    <label>最低分 <input type="number" id="va-min" value="60" style="width:60px"></label>
+    <label>每天取前 <input type="number" id="va-top" value="10" style="width:50px"> 只</label>
+    <label>买入价 <select id="va-entry"><option value="close">发现日收盘</option><option value="open">次日开盘</option></select></label>
+    <div class="chips" id="va-types"></div>
+    <div class="chips" id="va-boards"></div>
+    <button id="va-run" class="primary">开始验证</button>
+  </div>
+  <div class="hint">回到历史上每一天，只用当天及以前的数据跑一次选股，再看选出的股票之后 5/10/20 个交易日的涨跌。基准为沪深300同期涨跌。</div>
+  <div id="va-result"></div>
+</section>
+
+<!-- 策略回测 -->
+<section id="page-backtest" class="page">
+  <div class="toolbar wrap">
+    <label>开始 <input type="date" id="bt-start"></label>
+    <label>结束 <input type="date" id="bt-end"></label>
+    <label>最低分 <input type="number" id="bt-min" value="70" style="width:60px"></label>
+    <label>最多持仓 <input type="number" id="bt-pos" value="5" style="width:50px"></label>
+    <label>止损 <input type="number" id="bt-stop" value="8" style="width:50px">%</label>
+    <label class="check"><input type="checkbox" id="bt-bspstop" checked> 跌破买点止损</label>
+    <label>止盈 <input type="number" id="bt-tp" value="0" style="width:50px">%（0=不设）</label>
+    <label>最长持有 <input type="number" id="bt-hold" value="20" style="width:50px">天</label>
+    <label class="check"><input type="checkbox" id="bt-sell" checked> 出现卖点离场</label>
+    <div class="chips" id="bt-types"></div>
+    <div class="chips" id="bt-boards"></div>
+    <button id="bt-run" class="primary">开始回测</button>
+  </div>
+  <div class="hint">规则：发现日收盘后选出评分最高的买点，次日开盘买入（一字涨停买不进），等权分配；T+1；佣金万2.5、印花税万5、单边滑点千1。</div>
+  <div id="bt-result"></div>
+</section>
+
+<!-- 数据 -->
+<section id="page-data" class="page">
+  <div class="cards" id="dt-cards"></div>
+  <div class="toolbar">
+    <button id="dt-update" class="primary">更新行情 + 重算信号</button>
+    <button id="dt-signals">只重算信号</button>
+    <span class="hint">首次下载全A股约需 20–40 分钟；之后每天收盘后（18:00 以后）更新一次即可。</span>
+  </div>
+  <div class="progress"><div id="dt-bar"></div><span id="dt-ptext"></span></div>
+  <pre id="dt-log" class="log mono"></pre>
+</section>
+</main>
+
+<div id="modal" class="modal" style="display:none">
+  <div class="modal-box">
+    <div class="modal-head"><span id="modal-title"></span><button id="modal-close">关闭</button></div>
+    <div id="modal-info" class="detail"></div>
+    <div id="modal-chart" class="chart tall"></div>
+  </div>
+</div>
+
+<script src="/static/chart.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
