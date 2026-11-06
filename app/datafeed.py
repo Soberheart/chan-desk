@@ -24,14 +24,20 @@ def today():
 
 
 # ---------------------------------------------------------------- baostock
+BS_TIMEOUT = 30   # 秒。baostock 用裸 socket、默认不超时，网络一卡就会永远挂住整个下载任务
+
+
 class _BS:
     """每个进程各自登录一次 baostock。"""
     logged = False
 
     @classmethod
     def ensure(cls):
+        import socket
+
         import baostock as bs
         if not cls.logged:
+            socket.setdefaulttimeout(BS_TIMEOUT)
             lg = bs.login()
             if lg.error_code != "0":
                 raise RuntimeError(f"baostock 登录失败: {lg.error_msg}")
@@ -57,16 +63,21 @@ def bs_stock_list():
 def bs_daily(code, start, end, index=False):
     bs = _BS.ensure()
     fields = "date,open,high,low,close" if index else DAY_FIELDS
+    err = ""
     for attempt in range(3):
-        rs = bs.query_history_k_data_plus(code, fields, start_date=start, end_date=end,
-                                          frequency="d", adjustflag="3" if index else "2")
-        if rs.error_code == "0":
-            break
+        try:
+            rs = bs.query_history_k_data_plus(code, fields, start_date=start, end_date=end,
+                                              frequency="d", adjustflag="3" if index else "2")
+            if rs.error_code == "0":
+                df = _rs_to_df(rs)
+                break
+            err = rs.error_msg
+        except OSError as e:          # 超时 / 连接被断开 → 重新登录再试
+            err = f"网络超时或断开（{e}）"
         _BS.logged = False
         bs = _BS.ensure()
     else:
-        raise RuntimeError(f"{code}: {rs.error_msg}")
-    df = _rs_to_df(rs)
+        raise RuntimeError(f"{code}: {err}")
     if df.empty:
         return df
     num = [c for c in df.columns if c not in ("date", "tradestatus", "isST")]
@@ -417,6 +428,7 @@ def _seal_one(args):
         bars = (mock_5m_bars if MOCK else bs_5m_bars)(code, day)
         return code, day, seal_stats(bars), None
     except Exception as e:  # noqa
+        _BS.logged = False            # 下次调用重新登录
         return code, day, None, str(e)
 
 
