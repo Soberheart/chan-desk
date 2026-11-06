@@ -89,13 +89,13 @@ def load_panel():
     codes = [s[0] for s in stocks]
     T, N = len(days), len(codes)
     di = {d: i for i, d in enumerate(days)}
-    F = {k: np.full((T, N), np.nan, np.float32) for k in ("open", "high", "low", "close", "amount", "pct")}
+    F = {k: np.full((T, N), np.nan, np.float32) for k in ("open", "high", "low", "close", "amount", "pct", "turn")}
     st = np.zeros((T, N), bool)
     new = np.zeros((T, N), bool)
     conn = db.connect()
     try:
         for j, (code, ipo) in enumerate(stocks):
-            rows = conn.execute("SELECT date, open, high, low, close, amount, pct_chg, is_st FROM kline_d "
+            rows = conn.execute("SELECT date, open, high, low, close, amount, pct_chg, is_st, turn FROM kline_d "
                                 "WHERE code=? ORDER BY date", (code,)).fetchall()
             if not rows:
                 continue
@@ -106,6 +106,7 @@ def load_panel():
             for col, k in enumerate(("open", "high", "low", "close", "amount", "pct")):
                 F[k][idx, j] = arr[:, col]
             st[idx, j] = np.nan_to_num(arr[:, 6]) > 0
+            F["turn"][idx, j] = arr[:, 7]
             if len(idx) and ipo and days and ipo >= days[0]:
                 new[idx[:EMO["new_stock_days"]], j] = True
     finally:
@@ -424,7 +425,12 @@ def build(progress=lambda *a, **k: None):
     last = next((p for p in reversed(phase) if p), None)
     db.set_meta("last_emotion_build", {"time": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M"), "phase": last,
                                        "themes": K, "picks": len(pick_rows)})
-    return len(pick_rows)
+    # 交给连板天梯（ladder.py）继续用的中间结果
+    return {"n_picks": len(pick_rows), "P": P, "lim": lim, "valid": valid, "base": base, "nst": nst,
+            "ztm": ztm, "dtm": dtm, "board": board, "phase": phase, "temp": temp, "height": height,
+            "prev_zt_ret": prev_zt_ret, "zb_rate": zb_rate, "dt_n": dt_n, "K": K, "tnames": tnames,
+            "mem_idx": mem_idx, "M": M, "theme_zt": theme_zt, "zt5": zt5, "rank5": rank5, "main_mat": main_mat,
+            "old": old, "newt": newt, "leaders": leaders, "attr": attr}
 
 
 def run_phases(temp, height, hp_ret, kill_rank, dt_rank):

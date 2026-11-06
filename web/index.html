@@ -13,6 +13,7 @@
   <nav id="nav">
     <a data-page="select" class="active">选股台</a>
     <a data-page="emotion">水温·情绪</a>
+    <a data-page="ladder">连板天梯</a>
     <a data-page="replay">复盘回放</a>
     <a data-page="validate">历史验证</a>
     <a data-page="backtest">策略回测</a>
@@ -65,6 +66,31 @@
     <div class="section"><h4>连板梯队</h4><div id="em-ladder"></div></div>
     <div class="section"><h4>题材热度 <span class="muted" style="font-weight:400;font-size:12px" id="em-tsrc"></span></h4><div class="tablewrap" style="max-height:460px"><table class="grid" id="em-themes"></table></div></div>
   </div>
+</section>
+
+<!-- 连板天梯 -->
+<section id="page-ladder" class="page">
+  <div class="ld">
+    <div class="ld-bar">
+      <div class="ld-seg" id="ld-kind"><button data-k="zt" class="on">涨停</button><button data-k="dt">跌停</button></div>
+      <label class="ld-lbl">排序 <select id="ld-sort"><option value="theme">题材</option><option value="prob">晋级概率</option><option value="seal">首封时间</option><option value="turn">换手率</option></select></label>
+      <label class="ld-switch"><input type="checkbox" id="ld-failed"><i></i> 淘汰股</label>
+      <span id="ld-emo" class="ld-emo"></span>
+      <span class="ld-spacer"></span>
+      <button class="ld-btn" id="ld-model-btn">模型表现</button>
+      <div class="ld-date"><button class="ld-btn" id="ld-prev">‹</button><input type="date" id="ld-date"><button class="ld-btn" id="ld-next">›</button></div>
+    </div>
+    <div class="ld-themes" id="ld-themes"></div>
+    <div id="ld-msg" class="ld-msg"></div>
+    <div class="ld-focus" id="ld-focus"></div>
+    <div class="ld-board" id="ld-board"></div>
+    <div class="ld-foot">晋级概率 = 明天继续涨停的概率，由历史数据训练的模型给出（按季度滚动训练，不用未来数据）。鼠标停在卡片上看理由，点击看缠论结构。
+      历史日期的卡片右下角显示次日实际结果。概率只是统计倾向，不是确定性判断。</div>
+  </div>
+  <div id="ld-tip" class="ld-tip" style="display:none"></div>
+  <div id="ld-model" class="modal" style="display:none"><div class="modal-box ld-model-box">
+    <div class="modal-head"><span>晋级概率模型 · 样本外表现</span><button id="ld-model-close">关闭</button></div>
+    <div id="ld-model-body"></div></div></div>
 </section>
 
 <!-- 复盘回放 -->
@@ -150,6 +176,7 @@
     <button id="dt-signals">只重算信号</button>
     <button id="dt-emotion">只重算情绪周期</button>
     <button id="dt-themes">重新下载题材</button>
+    <button id="dt-seals" title="下载历史上每只二板及以上涨停的 5 分钟线，推算首封时间和开板次数，用于二进三模型。真实数据约需 15–30 分钟">补全分时封板（二进三）</button>
     <span class="hint">首次下载全A股约需 20–40 分钟；之后每天收盘后（18:00 以后）更新一次即可。</span>
   </div>
   <div class="progress"><div id="dt-bar"></div><span id="dt-ptext"></span></div>
