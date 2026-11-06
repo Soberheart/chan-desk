@@ -10,7 +10,7 @@ from collections import OrderedDict
 
 from flask import Flask, jsonify, request, send_from_directory
 
-from . import analytics, datafeed, db
+from . import analytics, datafeed, db, emotion
 from .chan_engine import Stepper, new_chan, serialize, make_klu, serialize_level, LEVELS
 from .settings import LOG_PATH, MOCK, PROGRESS_PATH, ROOT, WEB_DIR
 
@@ -67,6 +67,7 @@ def status():
     running = _job["proc"] is not None and _job["proc"].poll() is None
     return ok({"stocks": n_stock, "signals": n_sig, "signal_range": rng, "latest_day": analytics.latest_day(),
                "market": db.get_meta("last_market_update"), "build": db.get_meta("last_signal_build"),
+               "emotion": db.get_meta("last_emotion_build"), "themes": db.get_meta("themes_update"),
                "running": running, "progress": _progress(), "mock": MOCK})
 
 
@@ -108,7 +109,21 @@ def api_select():
     a = request.args
     res = analytics.select(date=a.get("date") or None, window=int(a.get("window", 3)),
                            min_score=float(a.get("min_score", 0)), types=_list(a.get("types")),
-                           boards=_list(a.get("boards")), exclude_st=a.get("exclude_st", "1") == "1")
+                           boards=_list(a.get("boards")), exclude_st=a.get("exclude_st", "1") == "1",
+                           gate=a.get("gate") == "1")
+    return ok(res)
+
+
+# ---------------------------------------------------------------- 情绪周期
+@app.get("/api/emotion")
+def api_emotion():
+    a = request.args
+    detail = emotion.day_detail(a.get("date") or None)
+    if detail is None:
+        return err("还没有情绪周期数据，请先到「数据」页更新")
+    res = {"detail": detail}
+    if a.get("series", "1") == "1":
+        res["series"] = emotion.series(a.get("start") or None, a.get("end") or None)
     return ok(res)
 
 
@@ -170,7 +185,9 @@ def api_validate():
     a = _args()
     res = analytics.validate(a["start"], a["end"], min_score=float(a.get("min_score", 60)),
                              top_n=int(a.get("top_n", 10)), types=_list(a.get("types")),
-                             entry=a.get("entry", "close"), boards=_list(a.get("boards")))
+                             entry=a.get("entry", "close"), boards=_list(a.get("boards")),
+                             gate=bool(a.get("gate")), source=a.get("source", "chan"), modes=_list(a.get("modes")),
+                             fit_only=bool(a.get("fit_only", True)), buyable_only=bool(a.get("buyable_only", True)))
     return ok(res)
 
 
@@ -182,7 +199,10 @@ def api_backtest():
         types=_list(a.get("types")), stop_pct=float(a.get("stop_pct", 0.08)),
         use_bsp_stop=bool(a.get("use_bsp_stop", True)), take_profit=float(a.get("take_profit", 0) or 0),
         max_hold=int(a.get("max_hold", 20)), exit_on_sell=bool(a.get("exit_on_sell", True)),
-        capital=float(a.get("capital", 1_000_000)), boards=_list(a.get("boards")))
+        capital=float(a.get("capital", 1_000_000)), boards=_list(a.get("boards")),
+        strategy=a.get("strategy", "chan"), gate=bool(a.get("gate")), phase_cap=bool(a.get("phase_cap")),
+        modes=_list(a.get("modes")), emo_min_score=float(a.get("emo_min_score", 0) or 0),
+        emo_fit_only=bool(a.get("emo_fit_only", True)))
     if "error" in res:
         return err(res["error"])
     return ok(res)

@@ -24,6 +24,18 @@ function chips(el, items, onDefault = []) {
   return () => [...el.querySelectorAll('.chip.on')].map(c => c.dataset.k);
 }
 function toast(msg) { $('#statusbar').textContent = msg; }
+const MODES = [['龙头', '龙头'], ['补涨', '补涨'], ['切换', '切换']];
+const PHASE_COLOR = { '低位试错': '#64748b', '主升': '#d93026', '高位震荡': '#c77700', '主跌': '#13a05b' };
+const phaseTag = p => p ? `<span class="ptag" style="background:${PHASE_COLOR[p] || '#999'}">${p}</span>` : '<span class="muted">-</span>';
+function phaseBanner(el, e, small) {
+  if (!e || !e.phase) { el.style.display = 'none'; return; }
+  el.style.display = '';
+  el.style.borderLeftColor = PHASE_COLOR[e.phase];
+  el.innerHTML = `<span class="ph" style="color:${PHASE_COLOR[e.phase]}">${e.phase}</span>
+    <span class="meta">水温 <b>${num(e.temp, 0)}</b> · 建议仓位上限 <b>${e.cap == null ? '-' : Math.round(e.cap * 100) + '%'}</b> · 推荐模式 ${(e.recommend || []).map(m => `<span class="tag">${m}</span>`).join('') || '-'} · ${e.date}</span>
+    ${small ? '' : (e.transition ? `<div class="meta">自 ${e.transition.date} 起进入${e.transition.phase}：${esc(e.transition.note)}</div>` : '')}
+    <div class="adv${small ? ' muted' : ''}" style="${small ? 'font-size:12px;margin-top:2px' : ''}">${esc(e.advice)}</div>`;
+}
 
 // ------------------------------------------------------------ 导航
 const pages = {};
@@ -41,6 +53,7 @@ async function refreshStatus() {
     const s = STATUS;
     let t = `最新交易日 ${s.latest_day || '无数据'} · ${s.stocks} 只股票 · ${s.signals} 条信号`;
     if (s.running && s.progress) t = `后台任务：${s.progress.stage} ${s.progress.total ? `${s.progress.done}/${s.progress.total}` : ''}`;
+    if (s.emotion && s.emotion.phase && !s.running) t += ` · 情绪：${s.emotion.phase}`;
     if (s.mock) t += ' · 模拟数据';
     toast(t);
   } catch (e) { toast('服务未连接：' + e.message); }
@@ -56,25 +69,28 @@ let selRows = [], selSort = { k: 'score', asc: false }, selCurrent = null;
 
 async function runSelect() {
   const q = new URLSearchParams({ date: $('#sel-date').value, window: $('#sel-window').value,
-    min_score: $('#sel-min').value, types: selTypes().join(','), boards: selBoards().join(',') });
+    min_score: $('#sel-min').value, types: selTypes().join(','), boards: selBoards().join(','), gate: $('#sel-gate').checked ? '1' : '0' });
   $('#sel-hint').textContent = '计算中…';
   try {
     const d = await api('/api/select?' + q);
     selRows = d.rows;
     if (!$('#sel-date').value) $('#sel-date').value = d.date;
-    $('#sel-hint').textContent = `${d.date}（信号窗口 ${d.days ? d.days[0] : ''} ~ ${d.date}）共 ${selRows.length} 只。评分只用发现日及之前的数据。`;
+    $('#sel-hint').textContent = `${d.date}（信号窗口 ${d.days ? d.days[0] : ''} ~ ${d.date}）共 ${selRows.length} 只${d.blocked ? `，水温闸门拦掉 ${d.blocked} 只` : ''}。评分只用发现日及之前的数据。`;
+    phaseBanner($('#sel-emo'), d.emotion, true);
     drawSelTable();
   } catch (e) { $('#sel-hint').textContent = '出错：' + e.message; }
 }
 function drawSelTable() {
-  const cols = [['code', '代码', 'l'], ['name', '名称', 'l'], ['types', '买点', 'l'], ['score', '评分'], ['bsp_date', '买点日'],
-    ['detect_date', '发现日'], ['close', '现价'], ['gain', '距买点'], ['c30', '区间套', 'l']];
+  const cols = [['code', '代码', 'l'], ['name', '名称', 'l'], ['types', '买点', 'l'], ['score', '评分'], ['theme', '题材/情绪', 'l'],
+    ['bsp_date', '买点日'], ['detect_date', '发现日'], ['close', '现价'], ['gain', '距买点'], ['c30', '区间套', 'l']];
   const k = selSort.k;
   const rows = [...selRows].sort((a, b) => ((a[k] ?? -1e9) > (b[k] ?? -1e9) ? 1 : -1) * (selSort.asc ? 1 : -1));
   $('#sel-table').innerHTML = `<thead><tr>${cols.map(c => `<th class="${c[2] || ''}" data-k="${c[0]}">${c[1]}${k === c[0] ? (selSort.asc ? ' ▲' : ' ▼') : ''}</th>`).join('')}</tr></thead>
   <tbody>${rows.map(r => `<tr data-code="${r.code}" class="${selCurrent === r.code ? 'sel' : ''}">
     <td class="l mono">${r.code}</td><td class="l">${esc(r.name)}</td><td class="l">${typesCN(r.types)}</td>
-    <td><b>${num(r.score, 0)}</b></td><td>${r.bsp_date}</td><td>${r.detect_date}</td><td>${num(r.close)}</td><td>${pct(r.gain, 1)}</td>
+    <td><b>${num(r.score, 0)}</b></td>
+    <td class="l">${phaseTag(r.phase)} ${esc(r.theme || '')} ${r.theme_new ? '<span class="tag new">新题材</span>' : ''}${r.theme_old ? '<span class="tag old">老题材</span>' : ''}${r.gate_ok === false ? `<span class="tag warn">${r.gate_reason}</span>` : ''}</td>
+    <td>${r.bsp_date}</td><td>${r.detect_date}</td><td>${num(r.close)}</td><td>${pct(r.gain, 1)}</td>
     <td class="l">${r.c30 == null ? '' : r.c30 === 'err' ? '<span class="muted">失败</span>' : r.c30 ? '<span class="tag">30分钟买点</span>' : '<span class="muted">无</span>'}</td></tr>`).join('')}</tbody>`;
 }
 $('#sel-table').onclick = e => {
@@ -91,6 +107,7 @@ async function showSelStock(code) {
   const maxes = { '类型': 35, '力度': 25, '结构': 15, '及时': 10, '确认': 10, '位置': 15 };
   $('#sel-detail').innerHTML = `<h3>${esc(r.name)} <span class="mono muted">${r.code}</span> <span class="tag">${typesCN(r.types)}</span> 评分 <b>${num(r.score, 0)}</b></h3>
     <div class="muted">买点 ${r.bsp_date} @ ${num(r.bsp_price)} · 发现于 ${r.detect_date} · 现价 ${num(r.close)}（距买点 ${pct(r.gain, 1)}）· ${r.board}</div>
+    <div class="muted">发现日情绪：${phaseTag(r.phase)} ${r.theme ? '题材 ' + esc(r.theme) : '无热门题材'}${r.hyped ? ` · 近40日最高 ${r.hyped} 板` : ''}${r.gate_ok === false ? ` · <span class="tag warn">闸门：${r.gate_reason}</span>` : ''}</div>
     <div class="bars">${Object.entries(det).map(([k, v]) => `<span>${k}</span><div class="bar"><i style="width:${Math.min(100, v / (maxes[k] || 25) * 100)}%"></i></div><span>${v}/${maxes[k] || ''}</span>`).join('')}</div>
     <div class="muted" style="font-size:12px">特征：${Object.entries(r.features || {}).map(([k, v]) => `${k}=${v}`).join('，') || '无'}</div>
     <div style="margin-top:6px"><button id="sel-one30">30分钟区间套确认</button> <button id="sel-replay">在复盘里回放</button> <span id="sel-30msg" class="muted"></span></div>`;
@@ -127,6 +144,106 @@ $('#sel-confirm').onclick = async () => {
   btn.textContent = '前20只做区间套确认'; btn.disabled = false;
 };
 pages.select = { show() { if (!selRows.length) runSelect(); } };
+
+// ------------------------------------------------------------ 水温·情绪周期
+let emChart = null, EM = null;
+function phaseBands(dates, phases) {
+  const out = [];
+  let s = 0;
+  for (let i = 1; i <= dates.length; i++) {
+    if (i === dates.length || phases[i] !== phases[s]) {
+      if (phases[s]) out.push([{ xAxis: dates[s], itemStyle: { color: PHASE_COLOR[phases[s]], opacity: 0.12 } }, { xAxis: dates[i - 1] }]);
+      s = i;
+    }
+  }
+  return out;
+}
+async function runEmotion(date, withSeries = true) {
+  const q = new URLSearchParams({ date: date || $('#em-date').value || '', series: withSeries ? '1' : '0' });
+  const yrs = +$('#em-range').value;
+  if (withSeries && yrs) { const d = new Date(date || $('#em-date').value || Date.now()); d.setFullYear(d.getFullYear() - yrs); q.set('start', d.toISOString().slice(0, 10)); }
+  $('#em-empty').textContent = '加载中…';
+  try {
+    const d = await api('/api/emotion?' + q);
+    $('#em-empty').textContent = '';
+    if (withSeries) { EM = d.series; drawEmotionChart(); }
+    drawEmotionDay(d.detail);
+  } catch (e) { $('#em-empty').textContent = e.message; }
+}
+function drawEmotionChart() {
+  if (!emChart) {
+    emChart = echarts.init($('#em-chart'));
+    window.addEventListener('resize', () => emChart.resize());
+    let hover = null;
+    emChart.on('updateAxisPointer', e => { const a = (e.axesInfo || [])[0]; if (a) hover = a.value; });
+    emChart.getZr().on('click', e => {
+      if (!EM || hover == null || !emChart.containPixel({ gridIndex: [0, 1] }, [e.offsetX, e.offsetY])) return;
+      const x = EM[hover];
+      if (x) { $('#em-date').value = x.date; runEmotion(x.date, false); }
+    });
+  }
+  const dates = EM.map(x => x.date);
+  emChart.setOption({
+    animation: false, legend: { top: 0 }, axisPointer: { link: [{ xAxisIndex: 'all' }] },
+    tooltip: { trigger: 'axis', formatter: ps => { const x = EM[ps[0].dataIndex];
+      return `<b>${x.date}</b> ${x.phase}<br>水温 ${num(x.temp, 0)} · 最高 ${x.height} 板<br>涨停 ${x.zt} · 跌停 ${x.dt} · 炸板率 ${x.zb_rate == null ? '-' : (x.zb_rate * 100).toFixed(0) + '%'}<br>昨日涨停溢价 ${x.prev_zt_ret == null ? '-' : (x.prev_zt_ret * 100).toFixed(2) + '%'}${x.note ? '<br>' + esc(x.note) : ''}`; } },
+    grid: [{ left: 50, right: 50, top: 30, height: '50%' }, { left: 50, right: 50, top: '66%', height: '24%' }],
+    xAxis: [{ type: 'category', data: dates, axisLabel: { show: false } }, { type: 'category', gridIndex: 1, data: dates }],
+    yAxis: [{ min: 0, max: 100, name: '水温', splitLine: { lineStyle: { color: '#eef0f4' } } },
+            { gridIndex: 1, name: '家数', splitLine: { show: false } }, { gridIndex: 1, name: '板数', position: 'right', splitLine: { show: false } }],
+    dataZoom: [{ type: 'inside', xAxisIndex: [0, 1] }, { type: 'slider', xAxisIndex: [0, 1], height: 14, bottom: 0 }],
+    series: [
+      { name: '水温', type: 'line', data: EM.map(x => x.temp), symbol: 'none', lineStyle: { color: '#1f2329', width: 1.4 }, color: '#1f2329',
+        markArea: { silent: true, data: phaseBands(dates, EM.map(x => x.phase)) } },
+      { name: '涨停', type: 'bar', xAxisIndex: 1, yAxisIndex: 1, data: EM.map(x => x.zt), color: UP, barMaxWidth: 4 },
+      { name: '跌停', type: 'bar', xAxisIndex: 1, yAxisIndex: 1, data: EM.map(x => -x.dt), color: DOWN, barMaxWidth: 4, barGap: '-100%' },
+      { name: '最高板', type: 'line', xAxisIndex: 1, yAxisIndex: 2, data: EM.map(x => x.height), symbol: 'none', step: 'end', lineStyle: { color: '#2f5bea', width: 1 }, color: '#2f5bea' },
+    ] }, true);
+}
+function drawEmotionDay(D) {
+  const m = D.metrics;
+  phaseBanner($('#em-banner'), { ...m, cap: D.cap, recommend: D.recommend, advice: D.advice, transition: D.transition }, false);
+  const P = v => v == null ? '-' : (v * 100).toFixed(1) + '%';
+  const card = (k, v, s = '') => `<div class="card"><div class="k">${k}</div><div class="v" style="font-size:17px">${v}</div><div class="s">${s}</div></div>`;
+  $('#em-cards').innerHTML = [
+    card('涨停 / 跌停', `<span class="up">${m.zt}</span> / <span class="down">${m.dt}</span>`, `炸板 ${m.zb} · 炸板率 ${P(m.zb_rate)}`),
+    card('空间高度', `${m.height} 板`, `连板股 ${m.lb} 只`),
+    card('晋级率', `${P(m.promo1)} / ${P(m.promo_lb)}`, '1进2 / 连板晋级'),
+    card('昨日涨停今日', pct(m.prev_zt_ret), `昨日连板今日 ${pct(m.prev_lb_ret)}`),
+    card('大面 / A杀', `${m.damian} / ${m.kill}`, '昨涨停今跌≥5% / 高位股跌≥7%'),
+    card('高位股 / 中位股', `${pct(m.hp_ret)} / ${pct(m.mid_ret)}`, '当日平均涨跌'),
+    card('上涨家数占比', P(m.up_ratio), `成交额 ${num(m.amount, 0)} 亿`),
+  ].join('');
+  // 选股
+  const cols = D.recommend || [];
+  $('#em-picks').innerHTML = ['龙头', '补涨', '切换'].map(mode => {
+    const rows = D.picks[mode] || [];
+    const rec = cols.includes(mode);
+    return `<div><h5 class="${rec ? 'rec' : ''}">${rec ? '★ ' : ''}${mode}（${rows.length}）</h5>
+      ${rows.length ? `<table class="grid em-pick"><thead><tr><th class="l">名称</th><th class="l">题材</th><th>板</th><th>评分</th><th class="l">适配</th><th>次日开盘后3日</th></tr></thead><tbody>
+      ${rows.map(r => `<tr data-code="${r.code}" data-name="${esc(r.name)}" title="${esc(Object.entries(r.detail).map(([k, v]) => k + '：' + v).join('，'))}">
+        <td class="l">${esc(r.name)} <span class="mono muted">${r.code.slice(3)}</span></td><td class="l">${esc(r.theme || '-')}</td><td>${r.board}</td><td><b>${num(r.score, 0)}</b></td>
+        <td class="l">${r.fit ? '<span class="tag">适配</span>' : '<span class="tag gray">阶段不符</span>'}${r.buyable === false ? '<span class="tag warn">一字</span>' : ''}</td><td>${pct(r.oret3)}</td></tr>`).join('')}</tbody></table>`
+      : '<div class="muted">今天没有符合条件的股票</div>'}</div>`;
+  }).join('');
+  document.querySelectorAll('.em-pick').forEach(t => t.onclick = e => { const tr = e.target.closest('tr[data-code]'); if (tr) openModal(tr.dataset.code, D.date, tr.dataset.name); });
+  // 连板梯队
+  const byB = {};
+  D.ladder.forEach(x => (byB[x.board] = byB[x.board] || []).push(x));
+  $('#em-ladder').innerHTML = Object.keys(byB).sort((a, b) => b - a).map(b => `<div class="ladder-row"><b>${b}板</b><div>${byB[b].map(x =>
+    `<span class="stk" data-code="${x.code}" data-name="${esc(x.name)}">${esc(x.name)}<span class="muted">${x.theme ? '·' + esc(x.theme) : ''}</span></span>`).join('')}</div></div>`).join('')
+    || '<div class="muted">今天没有连板股</div>';
+  $('#em-ladder').onclick = e => { const s = e.target.closest('.stk'); if (s) openModal(s.dataset.code, D.date, s.dataset.name); };
+  // 题材
+  $('#em-tsrc').textContent = D.theme_source ? `来源：${D.theme_source}${D.theme_note ? '（' + D.theme_note + '）' : ''}` : '';
+  $('#em-themes').innerHTML = `<thead><tr><th class="l">题材</th><th>今日涨停</th><th>5日涨停</th><th class="l">龙头</th><th class="l">标记</th></tr></thead><tbody>${D.themes.map(t => `<tr>
+    <td class="l">${esc(t.theme)}</td><td>${t.zt}</td><td>${t.zt5}</td><td class="l">${t.leader ? esc(t.leader_name) + ` <span class="muted">${t.leader_board}板</span>` : '-'}</td>
+    <td class="l">${D.mainline.includes(t.theme) ? '<span class="tag main">主线</span>' : ''}${t.old ? '<span class="tag old">老题材</span>' : ''}${t.new ? '<span class="tag new">新题材</span>' : ''}</td></tr>`).join('')
+    || '<tr><td colspan="5" class="muted l">近5日没有题材出现涨停</td></tr>'}</tbody>`;
+}
+$('#em-run').onclick = () => runEmotion();
+$('#em-range').onchange = () => runEmotion();
+pages.emotion = { show() { if (!EM) runEmotion(); else emChart && emChart.resize(); } };
 
 // ------------------------------------------------------------ 复盘回放
 const rpChart = chanChart($('#rp-chart'));
@@ -215,36 +332,51 @@ document.addEventListener('keydown', e => {
 // ------------------------------------------------------------ 历史验证
 const vaTypes = chips($('#va-types'), TYPES, ['1', '2', '2s', '3a', '3b']);
 const vaBoards = chips($('#va-boards'), BOARDS, ['sh60', 'sz00', 'sz30']);
-const statTable = (rows, keyName) => `<table class="grid"><thead><tr><th class="l">${keyName}</th><th>样本</th>
-  <th>5日均值</th><th>5日胜率</th><th>10日均值</th><th>10日胜率</th><th>10日超额</th><th>20日均值</th><th>20日胜率</th><th>20日超额</th><th>10日内最大回撤</th></tr></thead>
-  <tbody>${rows.map(r => `<tr><td class="l">${keyName === '买点类型' ? (TYPE_CN[r.key] || r.key) : r.key}</td><td>${r.n}</td>
-  <td>${pct(r.avg5)}</td><td>${pct(r.win5, 1)}</td><td>${pct(r.avg10)}</td><td>${pct(r.win10, 1)}</td><td>${pct(r.excess10)}</td>
-  <td>${pct(r.avg20)}</td><td>${pct(r.win20, 1)}</td><td>${pct(r.excess20)}</td><td>${pct(r.mdd10)}</td></tr>`).join('')}</tbody></table>`;
+const vaModes = chips($('#va-modes'), MODES, ['龙头', '补涨', '切换']);
+$('#va-source').onchange = () => {
+  const emo = $('#va-source').value === 'emotion';
+  document.querySelectorAll('.va-chan').forEach(x => x.style.display = emo ? 'none' : '');
+  document.querySelectorAll('.va-emo').forEach(x => x.style.display = emo ? '' : 'none');
+  $('#va-min').value = emo ? 0 : 60;
+};
+const statTable = (rows, keyName, H, label = r => r.label || r.key) => `<table class="grid"><thead><tr><th class="l">${keyName}</th><th>样本</th>
+  ${H.map(h => `<th>${h}日均值</th><th>${h}日胜率</th>`).join('')}<th>${H[1]}日超额</th><th>${H[H.length - 1]}日超额</th><th>最大回撤</th></tr></thead>
+  <tbody>${rows.map(r => `<tr><td class="l">${label(r)}</td><td>${r.n}</td>
+  ${H.map(h => `<td>${pct(r['avg' + h])}</td><td>${pct(r['win' + h], 1)}</td>`).join('')}
+  <td>${pct(r['excess' + H[1]])}</td><td>${pct(r['excess' + H[H.length - 1]])}</td><td>${pct(r.mdd)}</td></tr>`).join('')}</tbody></table>`;
 
 $('#va-run').onclick = async () => {
   $('#va-result').innerHTML = '<div class="hint">计算中…</div>';
   try {
+    const emo = $('#va-source').value === 'emotion';
     const d = await api('/api/validate', { start: $('#va-start').value, end: $('#va-end').value, min_score: +$('#va-min').value,
-      top_n: +$('#va-top').value, types: vaTypes(), boards: vaBoards(), entry: $('#va-entry').value });
+      top_n: +$('#va-top').value, types: vaTypes(), boards: vaBoards(), entry: $('#va-entry').value,
+      source: emo ? 'emotion' : 'chan', gate: $('#va-gate').checked, modes: vaModes(), fit_only: $('#va-fit').checked });
     if (d.empty) { $('#va-result').innerHTML = '<div class="hint">这段时间没有符合条件的信号。</div>'; return; }
-    const s = d.summary;
+    const s = d.summary, H = d.horizons, hm = H[1];
     const card = (h) => `<div class="card"><div class="k">${h}日后（共 ${s.n} 次）</div><div class="v">${pct(s['avg' + h])}</div>
       <div class="s">胜率 ${pct(s['win' + h], 1)} · 中位数 ${pct(s['med' + h])}<br>沪深300 ${pct(s['bench' + h])} · 超额 ${pct(s['excess' + h])}</div></div>`;
-    $('#va-result').innerHTML = `<div class="cards">${card(5)}${card(10)}${card(20)}
-      <div class="card"><div class="k">10日内平均最大回撤</div><div class="v">${pct(s.mdd10)}</div><div class="s">买入后10天内最低价相对买入价</div></div></div>
-      <div class="cols"><div class="section"><h4>按评分分档（评分有效的话，高分档收益应更高）</h4>${statTable(d.by_bucket, '评分')}</div>
-      <div class="section"><h4>按买点类型</h4>${statTable(d.by_type, '买点类型')}</div></div>
-      <div class="section"><h4>每月表现（10日平均收益 vs 沪深300）</h4><div id="va-month" class="chart"></div></div>
+    const note = emo ? (d.unbuyable ? `另有 ${d.unbuyable} 次次日一字涨停买不进，未计入。` : '')
+      : (d.blocked ? `水温闸门拦掉 ${d.blocked} 次信号。` : '');
+    const pickHead = emo ? '<th class="l">日期</th><th class="l">代码</th><th class="l">名称</th><th class="l">模式</th><th class="l">题材</th><th>板</th><th>评分</th><th class="l">阶段</th><th>1日</th><th>3日</th><th>5日</th><th>10日</th><th>5日最大回撤</th>'
+      : '<th class="l">发现日</th><th class="l">代码</th><th class="l">名称</th><th class="l">买点</th><th>评分</th><th class="l">阶段</th><th class="l">题材</th><th>5日</th><th>10日</th><th>20日</th><th>10日最大回撤</th><th>10日最大涨幅</th>';
+    const pickRow = p => emo ? `<td class="l">${p.date}</td><td class="l mono">${p.code}</td><td class="l">${esc(p.name)}</td><td class="l">${p.mode}</td><td class="l">${esc(p.theme || '')}</td><td>${p.board}</td><td>${num(p.score, 0)}</td><td class="l">${phaseTag(p.phase)}</td><td>${pct(p.r1)}</td><td>${pct(p.r3)}</td><td>${pct(p.r5)}</td><td>${pct(p.r10)}</td><td>${pct(p.mdd5)}</td>`
+      : `<td class="l">${p.date}</td><td class="l mono">${p.code}</td><td class="l">${esc(p.name)}</td><td class="l">${typesCN(p.types)}</td><td>${num(p.score, 0)}</td><td class="l">${phaseTag(p.phase)}</td><td class="l">${esc(p.theme || '')}</td><td>${pct(p.r5)}</td><td>${pct(p.r10)}</td><td>${pct(p.r20)}</td><td>${pct(p.mdd10)}</td><td>${pct(p.mfe10)}</td>`;
+    $('#va-result').innerHTML = `${note ? `<div class="hint">${note}</div>` : ''}<div class="cards">${H.map(card).join('')}
+      <div class="card"><div class="k">平均最大回撤</div><div class="v">${pct(s.mdd)}</div><div class="s">买入后${emo ? 5 : 10}天内最低价相对买入价</div></div></div>
+      <div class="section"><h4>按情绪阶段（检验水温：阶段判断有用的话，同样的信号在不同阶段表现应明显不同）</h4>${statTable(d.by_phase, '情绪阶段', H, r => phaseTag(r.key === '无情绪数据' ? null : r.key) + (r.key === '无情绪数据' ? ' 无情绪数据' : ''))}</div>
+      <div class="cols"><div class="section"><h4>按评分分档（评分有效的话，高分档收益应更高）</h4>${statTable(d.by_bucket, '评分', H)}</div>
+      <div class="section"><h4>${emo ? '按模式' : '按买点类型'}</h4>${statTable(d.by_type, emo ? '模式' : '买点类型', H)}</div></div>
+      <div class="section"><h4>每月表现（${hm}日平均收益 vs 沪深300）</h4><div id="va-month" class="chart"></div></div>
       <div class="section"><h4>历史选股明细（最近 ${d.picks.length} 条，点击查看当时的缠论图）</h4><div class="tablewrap" style="max-height:420px">
-      <table class="grid" id="va-picks"><thead><tr><th class="l">发现日</th><th class="l">代码</th><th class="l">名称</th><th class="l">买点</th><th>评分</th><th>5日</th><th>10日</th><th>20日</th><th>10日最大回撤</th><th>10日最大涨幅</th></tr></thead>
-      <tbody>${d.picks.map(p => `<tr data-code="${p.code}" data-date="${p.date}" data-name="${esc(p.name)}"><td class="l">${p.date}</td><td class="l mono">${p.code}</td><td class="l">${esc(p.name)}</td><td class="l">${typesCN(p.types)}</td>
-      <td>${num(p.score, 0)}</td><td>${pct(p.r5)}</td><td>${pct(p.r10)}</td><td>${pct(p.r20)}</td><td>${pct(p.mdd10)}</td><td>${pct(p.mfe10)}</td></tr>`).join('')}</tbody></table></div></div>`;
+      <table class="grid" id="va-picks"><thead><tr>${pickHead}</tr></thead>
+      <tbody>${d.picks.map(p => `<tr data-code="${p.code}" data-date="${p.date}" data-name="${esc(p.name)}">${pickRow(p)}</tr>`).join('')}</tbody></table></div></div>`;
     const m = echarts.init($('#va-month'));
     m.setOption({ tooltip: { trigger: 'axis', valueFormatter: v => v == null ? '-' : (v * 100).toFixed(2) + '%' }, legend: { top: 0 },
       grid: { left: 50, right: 20, top: 30, bottom: 30 }, xAxis: { type: 'category', data: d.by_month.map(x => x.key) },
       yAxis: { type: 'value', axisLabel: { formatter: v => (v * 100).toFixed(0) + '%' } },
-      series: [{ name: '选股10日平均', type: 'bar', color: UP, data: d.by_month.map(x => ({ value: x.avg10, itemStyle: { color: x.avg10 >= 0 ? UP : DOWN } })) },
-               { name: '沪深300 同期', type: 'line', color: '#2f5bea', data: d.by_month.map(x => x.bench10), symbol: 'none', lineStyle: { color: '#2f5bea' } }] });
+      series: [{ name: `选股${hm}日平均`, type: 'bar', color: UP, data: d.by_month.map(x => ({ value: x['avg' + hm], itemStyle: { color: x['avg' + hm] >= 0 ? UP : DOWN } })) },
+               { name: '沪深300 同期', type: 'line', color: '#2f5bea', data: d.by_month.map(x => x['bench' + hm]), symbol: 'none', lineStyle: { color: '#2f5bea' } }] });
     $('#va-picks').onclick = e => { const tr = e.target.closest('tr[data-code]'); if (tr) openModal(tr.dataset.code, tr.dataset.date, tr.dataset.name); };
   } catch (e) { $('#va-result').innerHTML = `<div class="down">${e.message}</div>`; }
 };
@@ -269,28 +401,37 @@ $('#modal').onclick = e => { if (e.target.id === 'modal') $('#modal').style.disp
 // ------------------------------------------------------------ 策略回测
 const btTypes = chips($('#bt-types'), TYPES, ['1', '2', '3a', '3b']);
 const btBoards = chips($('#bt-boards'), BOARDS, ['sh60', 'sz00', 'sz30']);
+const btModes = chips($('#bt-modes'), MODES, ['龙头', '补涨', '切换']);
+$('#bt-strategy').onchange = () => {
+  const st = $('#bt-strategy').value;
+  document.querySelectorAll('.bt-emo').forEach(x => x.style.display = st === 'chan' ? 'none' : '');
+  if (st !== 'chan') $('#bt-cap').checked = true;
+};
 $('#bt-run').onclick = async () => {
   $('#bt-result').innerHTML = '<div class="hint">回测中…</div>';
   try {
     const d = await api('/api/backtest', { start: $('#bt-start').value, end: $('#bt-end').value, min_score: +$('#bt-min').value,
       max_pos: +$('#bt-pos').value, stop_pct: +$('#bt-stop').value / 100, use_bsp_stop: $('#bt-bspstop').checked,
       take_profit: +$('#bt-tp').value / 100, max_hold: +$('#bt-hold').value, exit_on_sell: $('#bt-sell').checked,
-      types: btTypes(), boards: btBoards() });
+      types: btTypes(), boards: btBoards(), strategy: $('#bt-strategy').value, gate: $('#bt-gate').checked,
+      phase_cap: $('#bt-cap').checked, modes: btModes(), emo_min_score: +$('#bt-emin').value });
     const s = d.stats;
     const c = (k, v, sub = '') => `<div class="card"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${sub}</div></div>`;
     $('#bt-result').innerHTML = `<div class="cards">
       ${c('总收益', pct(s.total_return), '沪深300 ' + pct(s.bench_return))}${c('年化收益', pct(s.annual_return))}
       ${c('最大回撤', pct(s.max_drawdown))}${c('夏普比率', num(s.sharpe))}
       ${c('交易次数', s.trades, '平均持有 ' + num(s.avg_days, 1) + ' 天')}${c('胜率', pct(s.win_rate, 1), '盈亏比 ' + num(s.profit_factor))}
-      ${c('平均每笔', pct(s.avg_ret), '盈利 ' + pct(s.avg_win) + ' / 亏损 ' + pct(s.avg_loss))}${c('持仓时间占比', pct(s.exposure, 0))}</div>
+      ${c('平均每笔', pct(s.avg_ret), '盈利 ' + pct(s.avg_win) + ' / 亏损 ' + pct(s.avg_loss))}${c('持仓时间占比', pct(s.exposure, 0), s.gate_blocked ? `闸门拦掉 ${s.gate_blocked} 次信号` : '')}</div>
       <div class="section"><div id="bt-curve" class="chart tall" style="border:none"></div></div>
-      <div class="cols"><div class="section"><h4>离场原因</h4><table class="grid"><thead><tr><th class="l">原因</th><th>次数</th><th>平均收益</th></tr></thead>
+      <div class="cols"><div class="section"><h4>按模式</h4><table class="grid"><thead><tr><th class="l">模式</th><th>次数</th><th>平均收益</th><th>胜率</th></tr></thead>
+      <tbody>${(s.by_mode || []).map(r => `<tr><td class="l">${r.mode}</td><td>${r.count}</td><td>${pct(r.mean)}</td><td>${pct(r.win, 1)}</td></tr>`).join('')}</tbody></table></div>
+      <div class="section"><h4>离场原因</h4><table class="grid"><thead><tr><th class="l">原因</th><th>次数</th><th>平均收益</th></tr></thead>
       <tbody>${(s.by_reason || []).map(r => `<tr><td class="l">${r.reason}</td><td>${r.count}</td><td>${pct(r.mean)}</td></tr>`).join('')}</tbody></table></div>
-      <div class="section"><h4>期末持仓</h4><table class="grid"><thead><tr><th class="l">代码</th><th class="l">名称</th><th>买入日</th><th>收益</th></tr></thead>
-      <tbody>${d.open_positions.map(p => `<tr><td class="l mono">${p.code}</td><td class="l">${esc(p.name)}</td><td>${p.buy_date}</td><td>${pct(p.ret)}</td></tr>`).join('') || '<tr><td colspan="4" class="muted l">无</td></tr>'}</tbody></table></div></div>
+      </div><div class="section"><h4>期末持仓</h4><table class="grid"><thead><tr><th class="l">代码</th><th class="l">名称</th><th class="l">模式</th><th>买入日</th><th>收益</th></tr></thead>
+      <tbody>${d.open_positions.map(p => `<tr><td class="l mono">${p.code}</td><td class="l">${esc(p.name)}</td><td class="l">${p.mode}</td><td>${p.buy_date}</td><td>${pct(p.ret)}</td></tr>`).join('') || '<tr><td colspan="5" class="muted l">无</td></tr>'}</tbody></table></div>
       <div class="section"><h4>交易明细（${d.trades.length} 笔，点击查看买入时的缠论图）</h4><div class="tablewrap" style="max-height:420px"><table class="grid" id="bt-trades">
-      <thead><tr><th class="l">代码</th><th class="l">名称</th><th class="l">买点</th><th>评分</th><th>买入日</th><th>买入价</th><th>卖出日</th><th>卖出价</th><th>持有</th><th class="l">原因</th><th>收益</th></tr></thead>
-      <tbody>${d.trades.map(t => `<tr data-code="${t.code}" data-date="${t.buy_date}" data-name="${esc(t.name)}"><td class="l mono">${t.code}</td><td class="l">${esc(t.name)}</td><td class="l">${typesCN(t.types)}</td><td>${num(t.score, 0)}</td>
+      <thead><tr><th class="l">代码</th><th class="l">名称</th><th class="l">模式/买点</th><th class="l">题材</th><th>评分</th><th>买入日</th><th>买入价</th><th>卖出日</th><th>卖出价</th><th>持有</th><th class="l">原因</th><th>收益</th></tr></thead>
+      <tbody>${d.trades.map(t => `<tr data-code="${t.code}" data-date="${t.buy_date}" data-name="${esc(t.name)}"><td class="l mono">${t.code}</td><td class="l">${esc(t.name)}</td><td class="l">${t.mode === '缠论' ? typesCN(t.types) : t.mode}</td><td class="l">${esc(t.theme || '')}</td><td>${num(t.score, 0)}</td>
       <td>${t.buy_date}</td><td>${num(t.buy_price)}</td><td>${t.sell_date}</td><td>${num(t.sell_price)}</td><td>${t.days}</td><td class="l">${t.reason}</td><td>${pct(t.ret)}</td></tr>`).join('')}</tbody></table></div></div>`;
     const ch = echarts.init($('#bt-curve'));
     const cv = d.curve;
@@ -301,7 +442,8 @@ $('#bt-run').onclick = async () => {
       yAxis: [{ scale: true, axisLabel: { formatter: v => (v / 10000).toFixed(0) + '万' } },
               { gridIndex: 1, axisLabel: { formatter: v => (v * 100).toFixed(0) + '%' }, max: 0 }],
       dataZoom: [{ type: 'inside', xAxisIndex: [0, 1] }, { type: 'slider', xAxisIndex: [0, 1], height: 14, bottom: 0 }],
-      series: [{ name: '策略净值', type: 'line', color: UP, data: cv.equity, symbol: 'none', lineStyle: { color: UP, width: 1.6 } },
+      series: [{ name: '策略净值', type: 'line', color: UP, data: cv.equity, symbol: 'none', lineStyle: { color: UP, width: 1.6 },
+                 markArea: { silent: true, data: phaseBands(cv.dates, cv.phase || []) } },
                { name: '沪深300', type: 'line', color: '#2f5bea', data: cv.bench, symbol: 'none', lineStyle: { color: '#2f5bea', width: 1.2 } },
                { name: '回撤', type: 'line', color: DOWN, xAxisIndex: 1, yAxisIndex: 1, data: cv.drawdown, symbol: 'none', areaStyle: { color: 'rgba(19,160,91,.25)' }, lineStyle: { width: 0 } }] });
     $('#bt-trades').onclick = e => { const tr = e.target.closest('tr[data-code]'); if (tr) openModal(tr.dataset.code, prevDay(tr.dataset.date), tr.dataset.name); };
@@ -317,7 +459,9 @@ async function refreshData() {
   $('#dt-cards').innerHTML = [
     ['最新交易日', s.latest_day || '无'], ['股票数', s.stocks], ['信号条数', s.signals],
     ['信号区间', s.signal_range && s.signal_range[0] ? `${s.signal_range[0]} ~ ${s.signal_range[1]}` : '-'],
-    ['行情更新于', m.time || '-'], ['信号计算于', b.time || '-']
+    ['行情更新于', m.time || '-'], ['信号计算于', b.time || '-'],
+    ['情绪周期计算于', (s.emotion || {}).time || '-'],
+    ['题材来源', s.themes ? `${s.themes.source || '-'}（${s.themes.themes || 0} 个）` : '-']
   ].map(([k, v]) => `<div class="card"><div class="k">${k}</div><div class="v" style="font-size:15px">${v}</div></div>`).join('');
   const p = s.progress;
   if (p) {
@@ -326,7 +470,7 @@ async function refreshData() {
     $('#dt-ptext').textContent = `${p.running ? '运行中' : (p.ok ? '已完成' : '已结束')} · ${p.stage || ''} ${p.total ? `${p.done}/${p.total}` : ''} · 用时 ${Math.floor((p.elapsed || 0) / 60)} 分 ${(p.elapsed || 0) % 60} 秒 ${p.running ? '' : '· ' + (p.msg || '')}`;
   }
   try { $('#dt-log').textContent = (await api('/api/log')).join('\n'); } catch (_) {}
-  $('#dt-update').disabled = $('#dt-signals').disabled = !!s.running;
+  $('#dt-update').disabled = $('#dt-signals').disabled = $('#dt-emotion').disabled = $('#dt-themes').disabled = !!s.running;
   if (s.running && !dtTimer) dtTimer = setInterval(refreshData, 2000);
   if (!s.running && dtTimer) { clearInterval(dtTimer); dtTimer = null; }
 }
@@ -336,6 +480,8 @@ async function startJob(mode) {
 }
 $('#dt-update').onclick = () => startJob('update');
 $('#dt-signals').onclick = () => startJob('signals');
+$('#dt-emotion').onclick = () => startJob('emotion');
+$('#dt-themes').onclick = () => startJob('themes');
 pages.data = { show: refreshData };
 
 // ------------------------------------------------------------ 初始化
@@ -344,6 +490,7 @@ pages.data = { show: refreshData };
   const last = (s && s.latest_day) || new Date().toISOString().slice(0, 10);
   const yearsAgo = (n) => { const d = new Date(last); d.setFullYear(d.getFullYear() - n); return d.toISOString().slice(0, 10); };
   $('#sel-date').value = last;
+  $('#em-date').value = last;
   $('#va-start').value = yearsAgo(2); $('#va-end').value = last;
   $('#bt-start').value = yearsAgo(3); $('#bt-end').value = last;
   $('#rp-start').value = yearsAgo(1);

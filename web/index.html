@@ -9,9 +9,10 @@
 </head>
 <body>
 <header>
-  <div class="brand">缠论复盘选股台 <span class="sub">chan.py · baostock</span></div>
+  <div class="brand">缠论复盘选股台 <span class="sub">chan.py · baostock · 情绪周期</span></div>
   <nav id="nav">
     <a data-page="select" class="active">选股台</a>
+    <a data-page="emotion">水温·情绪</a>
     <a data-page="replay">复盘回放</a>
     <a data-page="validate">历史验证</a>
     <a data-page="backtest">策略回测</a>
@@ -29,9 +30,11 @@
     <label>最低分 <input type="number" id="sel-min" value="60" min="0" max="100" step="5" style="width:60px"></label>
     <div class="chips" id="sel-types"></div>
     <div class="chips" id="sel-boards"></div>
+    <label class="check" title="主跌期不抄老题材、高位震荡回避中位股"><input type="checkbox" id="sel-gate"> 水温闸门</label>
     <button id="sel-run" class="primary">选股</button>
     <button id="sel-confirm">前20只做区间套确认</button>
   </div>
+  <div id="sel-emo" class="phase-banner small" style="display:none"></div>
   <div class="split">
     <div class="left">
       <div class="hint" id="sel-hint"></div>
@@ -42,6 +45,25 @@
       <div id="sel-chart" class="chart tall"></div>
       <div id="sel-chart30" class="chart" style="display:none"></div>
     </div>
+  </div>
+</section>
+
+<!-- 水温·情绪周期 -->
+<section id="page-emotion" class="page">
+  <div class="toolbar">
+    <label>日期 <input type="date" id="em-date"></label>
+    <label>图表区间 <select id="em-range"><option value="1">近1年</option><option value="2" selected>近2年</option><option value="0">全部</option></select></label>
+    <button id="em-run" class="primary">查看</button>
+    <span class="hint" style="margin:0">点击图表上任意一天，查看那天的情绪细节（只用到当天及以前的数据）</span>
+  </div>
+  <div id="em-empty" class="hint"></div>
+  <div id="em-banner" class="phase-banner"></div>
+  <div class="cards" id="em-cards"></div>
+  <div class="section"><div id="em-chart" class="chart tall" style="border:none;height:460px"></div></div>
+  <div class="section"><h4>情绪选股 <span class="muted" style="font-weight:400;font-size:12px">当天收盘后选出，次日开盘买入；★ 为当前阶段推荐的模式</span></h4><div id="em-picks" class="pick-cols"></div></div>
+  <div class="cols">
+    <div class="section"><h4>连板梯队</h4><div id="em-ladder"></div></div>
+    <div class="section"><h4>题材热度 <span class="muted" style="font-weight:400;font-size:12px" id="em-tsrc"></span></h4><div class="tablewrap" style="max-height:460px"><table class="grid" id="em-themes"></table></div></div>
   </div>
 </section>
 
@@ -79,14 +101,18 @@
   <div class="toolbar">
     <label>开始 <input type="date" id="va-start"></label>
     <label>结束 <input type="date" id="va-end"></label>
+    <label>对象 <select id="va-source"><option value="chan">缠论买点</option><option value="emotion">情绪选股</option></select></label>
     <label>最低分 <input type="number" id="va-min" value="60" style="width:60px"></label>
     <label>每天取前 <input type="number" id="va-top" value="10" style="width:50px"> 只</label>
-    <label>买入价 <select id="va-entry"><option value="close">发现日收盘</option><option value="open">次日开盘</option></select></label>
-    <div class="chips" id="va-types"></div>
+    <label class="va-chan">买入价 <select id="va-entry"><option value="close">发现日收盘</option><option value="open">次日开盘</option></select></label>
+    <label class="check va-chan" title="主跌期不抄老题材、高位震荡回避中位股"><input type="checkbox" id="va-gate"> 水温闸门</label>
+    <div class="chips va-chan" id="va-types"></div>
+    <div class="chips va-emo" id="va-modes" style="display:none"></div>
+    <label class="check va-emo" style="display:none"><input type="checkbox" id="va-fit" checked> 只看阶段适配</label>
     <div class="chips" id="va-boards"></div>
     <button id="va-run" class="primary">开始验证</button>
   </div>
-  <div class="hint">回到历史上每一天，只用当天及以前的数据跑一次选股，再看选出的股票之后 5/10/20 个交易日的涨跌。基准为沪深300同期涨跌。</div>
+  <div class="hint" id="va-hint">回到历史上每一天，只用当天及以前的数据跑一次选股，再看选出的股票之后若干交易日的涨跌。基准为沪深300同期涨跌。缠论买点看 5/10/20 日；情绪选股按次日开盘买入看 1/3/5/10 日，开盘一字涨停买不进的不计入。</div>
   <div id="va-result"></div>
 </section>
 
@@ -95,7 +121,12 @@
   <div class="toolbar wrap">
     <label>开始 <input type="date" id="bt-start"></label>
     <label>结束 <input type="date" id="bt-end"></label>
-    <label>最低分 <input type="number" id="bt-min" value="70" style="width:60px"></label>
+    <label>策略 <select id="bt-strategy"><option value="chan">缠论买点</option><option value="emotion">情绪模式</option><option value="both">缠论+情绪</option></select></label>
+    <label class="check" title="主跌期不抄老题材、高位震荡回避中位股（只作用于缠论买点）"><input type="checkbox" id="bt-gate"> 水温闸门</label>
+    <label class="check" title="主升满仓，低位试错/高位震荡半仓，主跌两成"><input type="checkbox" id="bt-cap"> 按阶段控仓</label>
+    <div class="chips bt-emo" id="bt-modes" style="display:none"></div>
+    <label class="bt-emo" style="display:none">情绪最低分 <input type="number" id="bt-emin" value="0" style="width:50px"></label>
+    <label>缠论最低分 <input type="number" id="bt-min" value="70" style="width:60px"></label>
     <label>最多持仓 <input type="number" id="bt-pos" value="5" style="width:50px"></label>
     <label>止损 <input type="number" id="bt-stop" value="8" style="width:50px">%</label>
     <label class="check"><input type="checkbox" id="bt-bspstop" checked> 跌破买点止损</label>
@@ -106,7 +137,8 @@
     <div class="chips" id="bt-boards"></div>
     <button id="bt-run" class="primary">开始回测</button>
   </div>
-  <div class="hint">规则：发现日收盘后选出评分最高的买点，次日开盘买入（一字涨停买不进），等权分配；T+1；佣金万2.5、印花税万5、单边滑点千1。</div>
+  <div class="hint">规则：收盘后选出评分最高的候选（情绪模式排在缠论前面），次日开盘买入（一字涨停买不进，按板块区分 10%/20%/ST 5%），等权分配；T+1；一字跌停卖不出顺延；佣金万2.5、印花税万5、单边滑点千1。
+    情绪模式离场：龙头断板收阴或连续两天不板、补涨不板就走或龙头大跌、切换题材连续三天无涨停、进入主跌时清掉龙头和补涨；止损和最长持有对所有仓位都生效（龙头最多10天、补涨3天、切换10天）。</div>
   <div id="bt-result"></div>
 </section>
 
@@ -116,6 +148,8 @@
   <div class="toolbar">
     <button id="dt-update" class="primary">更新行情 + 重算信号</button>
     <button id="dt-signals">只重算信号</button>
+    <button id="dt-emotion">只重算情绪周期</button>
+    <button id="dt-themes">重新下载题材</button>
     <span class="hint">首次下载全A股约需 20–40 分钟；之后每天收盘后（18:00 以后）更新一次即可。</span>
   </div>
   <div class="progress"><div id="dt-bar"></div><span id="dt-ptext"></span></div>
