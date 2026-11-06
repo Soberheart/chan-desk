@@ -24,14 +24,20 @@ def today():
 
 
 # ---------------------------------------------------------------- baostock
+BS_TIMEOUT = 30   # 秒。baostock 用裸 socket、默认不超时，网络一卡就会永远挂住整个下载任务
+
+
 class _BS:
     """每个进程各自登录一次 baostock。"""
     logged = False
 
     @classmethod
     def ensure(cls):
+        import socket
+
         import baostock as bs
         if not cls.logged:
+            socket.setdefaulttimeout(BS_TIMEOUT)
             lg = bs.login()
             if lg.error_code != "0":
                 raise RuntimeError(f"baostock 登录失败: {lg.error_msg}")
@@ -57,16 +63,21 @@ def bs_stock_list():
 def bs_daily(code, start, end, index=False):
     bs = _BS.ensure()
     fields = "date,open,high,low,close" if index else DAY_FIELDS
+    err = ""
     for attempt in range(3):
-        rs = bs.query_history_k_data_plus(code, fields, start_date=start, end_date=end,
-                                          frequency="d", adjustflag="3" if index else "2")
-        if rs.error_code == "0":
-            break
+        try:
+            rs = bs.query_history_k_data_plus(code, fields, start_date=start, end_date=end,
+                                              frequency="d", adjustflag="3" if index else "2")
+            if rs.error_code == "0":
+                df = _rs_to_df(rs)
+                break
+            err = rs.error_msg
+        except OSError as e:          # 超时 / 连接被断开 → 重新登录再试
+            err = f"网络超时或断开（{e}）"
         _BS.logged = False
         bs = _BS.ensure()
     else:
-        raise RuntimeError(f"{code}: {rs.error_msg}")
-    df = _rs_to_df(rs)
+        raise RuntimeError(f"{code}: {err}")
     if df.empty:
         return df
     num = [c for c in df.columns if c not in ("date", "tradestatus", "isST")]
@@ -186,6 +197,11 @@ def mock_stock_list():
     return res
 
 
+@lru_cache(maxsize=512)
+def _mock_full(code, end):
+    return _mock_series(code, _mock_days(DATA_START, end))
+
+
 def mock_daily(code, start, end, index=False):
     days = _mock_days(DATA_START, end)
     if index:
@@ -195,7 +211,7 @@ def mock_daily(code, start, end, index=False):
         c = 3500 * np.cumprod(1 + r)
         df = pd.DataFrame({"date": days, "open": c, "high": c * 1.005, "low": c * 0.995, "close": c})
     else:
-        df = _mock_series(code, days)
+        df = _mock_full(code, days[-1] if days else end).copy()
         df["tradestatus"] = "1"
         df["isST"] = "1" if code in ("sh.600003", "sz.000004") else "0"
     return df[(df["date"] >= start) & (df["date"] <= end)].copy()
@@ -336,3 +352,126 @@ def ensure_30m(code, start, end):
             c.executemany("INSERT OR REPLACE INTO kline_30m VALUES(?,?,?,?,?,?,?)",
                           [(code, r.time, r.open, r.high, r.low, r.close, r.volume) for r in df.itertuples()])
     return db.load_30m(code, start, end)
+
+
+# ---------------------------------------------------------------- 分时封板（首封时间、开板次数）
+# 用 baostock 5 分钟线（不复权）推算：涨停价 = 当天最高价；开盘即涨停记为 09:25；
+# 否则首封 = 第一根收在涨停价的 5 分钟K线的结束时间；开板次数 = 封住后又有成交低于涨停价的段数。
+# 只是近似（5 分钟粒度看不到秒级的开板），够用来区分“早封 / 午后封 / 尾盘封、封得牢 / 反复开板”。
+def seal_stats(bars):
+    """bars: [(hhmm, open, high, low, close), ...] 一天的 5 分钟线，按时间排序。"""
+    if not bars:
+        return None
+    lim = max(b[2] for b in bars)
+    tol = 0.0051
+    at = [b[4] >= lim - tol for b in bars]
+    if not at[-1]:
+        return None                      # 收盘没封住（不是涨停）
+    if bars[0][1] >= lim - tol:
+        first = "09:25"
+        sealed_from = 0
+    else:
+        sealed_from = at.index(True)
+        first = bars[sealed_from][0]
+    opens, sealed, last = 0, True, first
+    for i in range(sealed_from + 1, len(bars)):
+        broke = bars[i][3] < lim - tol
+        if sealed and broke:
+            opens += 1
+            sealed = False
+        if not sealed and at[i] and not broke:
+            sealed, last = True, bars[i][0]
+        elif not sealed and at[i]:
+            sealed, last = True, bars[i][0]
+    return first, last, opens
+
+
+def bs_5m_bars(code, day):
+    bs = _BS.ensure()
+    rs = bs.query_history_k_data_plus(code, "time,open,high,low,close", start_date=day, end_date=day,
+                                      frequency="5", adjustflag="3")
+    df = _rs_to_df(rs)
+    if df.empty:
+        return []
+    t = df["time"].str
+    hm = (t[8:10] + ":" + t[10:12]).tolist()
+    vals = df[["open", "high", "low", "close"]].apply(pd.to_numeric, errors="coerce").values.tolist()
+    return [(h, *v) for h, v in zip(hm, vals)]
+
+
+def mock_5m_bars(code, day):
+    full = _mock_full(code, today())
+    d = full[full["date"] == day]
+    if d.empty:
+        return []
+    r = d.iloc[0]
+    rng = np.random.default_rng(int(hashlib.md5((code + day).encode()).hexdigest()[:8], 16))
+    times = [f"{h:02d}:{m:02d}" for h, m in
+             [(9, 35 + 5 * i) for i in range(5)] + [(10, 5 * i) for i in range(12)] + [(11, 5 * i) for i in range(7)]
+             + [(13, 5 + 5 * i) for i in range(11)] + [(14, 5 * i) for i in range(12)] + [(15, 0)]]
+    n = len(times)
+    lim = r.high
+    if r.open >= lim - 0.005 and r.low >= lim - 0.005:
+        return [(t, lim, lim, lim, lim) for t in times]
+    k = int(min(n - 1, abs(rng.normal(0.25, 0.3)) * n))
+    path = list(np.linspace(r.open, lim, k + 1))[1:] + [lim] * (n - k)
+    out = []
+    for i, (t, c) in enumerate(zip(times, path[:n])):
+        lo = c * (1 - abs(rng.normal(0, 0.004))) if (c < lim or rng.random() < 0.06) else c
+        out.append((t, c, c, max(lo, r.low), c))
+    return out
+
+
+def _seal_one(args):
+    code, day = args
+    try:
+        bars = (mock_5m_bars if MOCK else bs_5m_bars)(code, day)
+        return code, day, seal_stats(bars), None
+    except Exception as e:  # noqa
+        _BS.logged = False            # 下次调用重新登录
+        return code, day, None, str(e)
+
+
+def update_seals(pairs, progress=lambda *a, **k: None):
+    """下载 (code, date) 对的分时封板数据，已有的跳过。返回 (成功数, 失败数)。"""
+    db.init_db()
+    with db.session() as c:
+        have = set(c.execute("SELECT code, date FROM zt_seal").fetchall())
+    tasks = [p for p in dict.fromkeys(pairs) if p not in have]
+    if not tasks:
+        return 0, 0
+    progress("stage", f"下载分时封板数据（{len(tasks)} 个涨停）")
+    done, ok_, bad = 0, 0, 0
+    conn = db.connect()
+
+    def save(code, day, st, err):
+        nonlocal ok_, bad
+        if err or st is None:
+            bad += 1
+            # 拿不到或当天没封住也记一行，避免反复下载
+            conn.execute("INSERT OR REPLACE INTO zt_seal VALUES(?,?,?,?,?)", (code, day, None, None, None))
+        else:
+            ok_ += 1
+            conn.execute("INSERT OR REPLACE INTO zt_seal VALUES(?,?,?,?,?)", (code, day, *st))
+
+    try:
+        workers = 1 if MOCK else DOWNLOAD_WORKERS
+        if workers == 1:
+            for t in tasks:
+                save(*_seal_one(t))
+                done += 1
+                if done % 50 == 0 or done == len(tasks):
+                    conn.commit()
+                    progress("seal", done=done, total=len(tasks))
+        else:
+            with ProcessPoolExecutor(workers) as ex:
+                for f in as_completed([ex.submit(_seal_one, t) for t in tasks]):
+                    save(*f.result())
+                    done += 1
+                    if done % 50 == 0 or done == len(tasks):
+                        conn.commit()
+                        progress("seal", done=done, total=len(tasks))
+        conn.commit()
+    finally:
+        conn.close()
+    return ok_, bad

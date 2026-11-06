@@ -10,7 +10,7 @@ from collections import OrderedDict
 
 from flask import Flask, jsonify, request, send_from_directory
 
-from . import analytics, datafeed, db, emotion
+from . import analytics, datafeed, db, emotion, ladder
 from .chan_engine import Stepper, new_chan, serialize, make_klu, serialize_level, LEVELS
 from .settings import LOG_PATH, MOCK, PROGRESS_PATH, ROOT, WEB_DIR
 
@@ -68,6 +68,7 @@ def status():
     return ok({"stocks": n_stock, "signals": n_sig, "signal_range": rng, "latest_day": analytics.latest_day(),
                "market": db.get_meta("last_market_update"), "build": db.get_meta("last_signal_build"),
                "emotion": db.get_meta("last_emotion_build"), "themes": db.get_meta("themes_update"),
+               "ladder": db.get_meta("last_ladder_build"),
                "running": running, "progress": _progress(), "mock": MOCK})
 
 
@@ -112,6 +113,21 @@ def api_select():
                            boards=_list(a.get("boards")), exclude_st=a.get("exclude_st", "1") == "1",
                            gate=a.get("gate") == "1")
     return ok(res)
+
+
+# ---------------------------------------------------------------- 连板天梯
+@app.get("/api/ladder")
+def api_ladder():
+    a = request.args
+    res = ladder.day(a.get("date") or None, a.get("kind", "zt"))
+    if res is None:
+        return err("还没有连板天梯数据，请先到「数据」页更新")
+    return ok(res)
+
+
+@app.get("/api/ladder/eval")
+def api_ladder_eval():
+    return ok(ladder.evaluation())
 
 
 # ---------------------------------------------------------------- 情绪周期

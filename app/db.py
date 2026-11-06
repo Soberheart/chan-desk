@@ -51,6 +51,13 @@ CREATE TABLE IF NOT EXISTS emo_picks(
     buyable INTEGER, oret1 REAL, oret3 REAL, oret5 REAL, oret10 REAL, mdd5 REAL,
     PRIMARY KEY(date, mode, code)
 ) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS zt_seal(
+    code TEXT, date TEXT, first_seal TEXT, last_seal TEXT, open_times INTEGER, PRIMARY KEY(code, date)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS ladder(
+    date TEXT, code TEXT, kind TEXT, board INTEGER, theme TEXT, tags TEXT, prob REAL, why TEXT,
+    nxt_zt INTEGER, nxt_pct REAL, dab_ret REAL, PRIMARY KEY(date, code)
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS sig_emo(
     code TEXT, date TEXT, phase TEXT, theme TEXT, theme_old INTEGER, theme_new INTEGER,
     hyped INTEGER, maxb5 INTEGER, PRIMARY KEY(code, date)

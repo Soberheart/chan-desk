@@ -4,6 +4,7 @@
        python -m app.jobs signals       （只重算缠论信号和情绪周期）
        python -m app.jobs emotion       （只重算情绪周期）
        python -m app.jobs themes        （强制重新下载题材成分，再重算情绪周期）
+       python -m app.jobs seals         （补全历史二板及以上的分时封板数据，再重算连板天梯）
 """
 import datetime as dt
 import json
@@ -13,7 +14,7 @@ import time
 import traceback
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-from . import datafeed, db, emotion, themes
+from . import datafeed, db, emotion, ladder, themes
 from .settings import LOG_PATH, PROGRESS_PATH, SCAN_WORKERS, SIGNAL_START
 
 
@@ -119,9 +120,23 @@ def main(argv):
         if cmd in ("update", "signals"):
             n, errs = build_signals(p)
             msg.append(f"共 {n} 条缠论信号，计算失败 {len(errs)} 只")
-        k = emotion.build(p)
+        ctx = emotion.build(p)
         last = (db.get_meta("last_emotion_build") or {}).get("phase")
-        msg.append(f"情绪周期已更新（当前阶段：{last or '数据不足'}，{k} 条情绪选股记录）")
+        msg.append(f"情绪周期已更新（当前阶段：{last or '数据不足'}，{ctx['n_picks'] if ctx else 0} 条情绪选股记录）")
+        if ctx:
+            pairs = ladder.seal_pairs(ctx, last_days=5)                       # 最近 5 天全部涨停
+            if cmd == "seals":
+                pairs += ladder.seal_pairs(ctx, since=SIGNAL_START, min_board=2)   # 历史二板及以上
+            if cmd in ("update", "seals"):
+                ok_, bad = datafeed.update_seals(pairs, p)
+                if ok_ or bad:
+                    p.log(f"分时封板数据：新增 {ok_} 条，拿不到 {bad} 条")
+            n = ladder.build(ctx, p)
+            ev = (db.get_meta("ladder_eval") or {}).get("二板", {})
+            if ev.get("auc"):
+                msg.append(f"连板天梯已更新（二进三模型样本外 AUC {ev['auc']:.2f}）")
+            else:
+                msg.append(f"连板天梯已更新（{n} 条）")
         p.finish(True, "完成：" + "；".join(msg))
     except Exception as e:  # noqa
         p.log(traceback.format_exc())

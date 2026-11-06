@@ -25,7 +25,7 @@ function chips(el, items, onDefault = []) {
 }
 function toast(msg) { $('#statusbar').textContent = msg; }
 const MODES = [['龙头', '龙头'], ['补涨', '补涨'], ['切换', '切换']];
-const PHASE_COLOR = { '低位试错': '#64748b', '主升': '#d93026', '高位震荡': '#c77700', '主跌': '#13a05b' };
+const PHASE_COLOR = { '低位试错': '#7d8aa0', '主升': '#f0524a', '高位震荡': '#e0a030', '主跌': '#26b36e' };
 const phaseTag = p => p ? `<span class="ptag" style="background:${PHASE_COLOR[p] || '#999'}">${p}</span>` : '<span class="muted">-</span>';
 function phaseBanner(el, e, small) {
   if (!e || !e.phase) { el.style.display = 'none'; return; }
@@ -152,7 +152,7 @@ function phaseBands(dates, phases) {
   let s = 0;
   for (let i = 1; i <= dates.length; i++) {
     if (i === dates.length || phases[i] !== phases[s]) {
-      if (phases[s]) out.push([{ xAxis: dates[s], itemStyle: { color: PHASE_COLOR[phases[s]], opacity: 0.12 } }, { xAxis: dates[i - 1] }]);
+      if (phases[s]) out.push([{ xAxis: dates[s], itemStyle: { color: PHASE_COLOR[phases[s]], opacity: phases[s] === '低位试错' ? 0.05 : 0.16 } }, { xAxis: dates[i - 1] }]);
       s = i;
     }
   }
@@ -172,7 +172,7 @@ async function runEmotion(date, withSeries = true) {
 }
 function drawEmotionChart() {
   if (!emChart) {
-    emChart = echarts.init($('#em-chart'));
+    emChart = echarts.init($('#em-chart'), THEME);
     window.addEventListener('resize', () => emChart.resize());
     let hover = null;
     emChart.on('updateAxisPointer', e => { const a = (e.axesInfo || [])[0]; if (a) hover = a.value; });
@@ -189,15 +189,15 @@ function drawEmotionChart() {
       return `<b>${x.date}</b> ${x.phase}<br>水温 ${num(x.temp, 0)} · 最高 ${x.height} 板<br>涨停 ${x.zt} · 跌停 ${x.dt} · 炸板率 ${x.zb_rate == null ? '-' : (x.zb_rate * 100).toFixed(0) + '%'}<br>昨日涨停溢价 ${x.prev_zt_ret == null ? '-' : (x.prev_zt_ret * 100).toFixed(2) + '%'}${x.note ? '<br>' + esc(x.note) : ''}`; } },
     grid: [{ left: 50, right: 50, top: 30, height: '50%' }, { left: 50, right: 50, top: '66%', height: '24%' }],
     xAxis: [{ type: 'category', data: dates, axisLabel: { show: false } }, { type: 'category', gridIndex: 1, data: dates }],
-    yAxis: [{ min: 0, max: 100, name: '水温', splitLine: { lineStyle: { color: '#eef0f4' } } },
+    yAxis: [{ min: 0, max: 100, name: '水温', splitLine: { lineStyle: { color: '#202834' } } },
             { gridIndex: 1, name: '家数', splitLine: { show: false } }, { gridIndex: 1, name: '板数', position: 'right', splitLine: { show: false } }],
     dataZoom: [{ type: 'inside', xAxisIndex: [0, 1] }, { type: 'slider', xAxisIndex: [0, 1], height: 14, bottom: 0 }],
     series: [
-      { name: '水温', type: 'line', data: EM.map(x => x.temp), symbol: 'none', lineStyle: { color: '#1f2329', width: 1.4 }, color: '#1f2329',
+      { name: '水温', type: 'line', data: EM.map(x => x.temp), symbol: 'none', lineStyle: { color: '#e3e7ee', width: 1.4 }, color: '#e3e7ee',
         markArea: { silent: true, data: phaseBands(dates, EM.map(x => x.phase)) } },
       { name: '涨停', type: 'bar', xAxisIndex: 1, yAxisIndex: 1, data: EM.map(x => x.zt), color: UP, barMaxWidth: 4 },
       { name: '跌停', type: 'bar', xAxisIndex: 1, yAxisIndex: 1, data: EM.map(x => -x.dt), color: DOWN, barMaxWidth: 4, barGap: '-100%' },
-      { name: '最高板', type: 'line', xAxisIndex: 1, yAxisIndex: 2, data: EM.map(x => x.height), symbol: 'none', step: 'end', lineStyle: { color: '#2f5bea', width: 1 }, color: '#2f5bea' },
+      { name: '最高板', type: 'line', xAxisIndex: 1, yAxisIndex: 2, data: EM.map(x => x.height), symbol: 'none', step: 'end', lineStyle: { color: '#6f95ff', width: 1 }, color: '#6f95ff' },
     ] }, true);
 }
 function drawEmotionDay(D) {
@@ -244,6 +244,159 @@ function drawEmotionDay(D) {
 $('#em-run').onclick = () => runEmotion();
 $('#em-range').onchange = () => runEmotion();
 pages.emotion = { show() { if (!EM) runEmotion(); else emChart && emChart.resize(); } };
+
+// ------------------------------------------------------------ 连板天梯
+const LD = { data: null, theme: null, kind: 'zt' };
+const TCOLORS = ['#ff6b5f', '#ff8f3f', '#f2b134', '#e05db5', '#b57bff', '#5b8cff', '#36b3e0', '#2fc4a0', '#8bc34a', '#f06292', '#a1887f', '#7986cb'];
+function themeColor(t) {
+  if (!t) return '#5c6778';
+  let h = 0; for (const ch of t) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return TCOLORS[h % TCOLORS.length];
+}
+const probColor = p => p == null ? '#6b7585' : p >= 0.5 ? '#ff5a4f' : p >= 0.35 ? '#ff9f43' : p >= 0.2 ? '#d7dce4' : '#6b7585';
+const probTxt = p => p == null ? '--' : Math.round(p * 100) + '%';
+const sealKey = r => r.tags.first ? (r.tags.first === '09:25' ? '09:25' : r.tags.first) : '99:99';
+function whyHtml(why, max = 6) {
+  return (why || []).slice(0, max).map(([k, v, c]) => `<b class="${c >= 0 ? 'pos' : 'neg'}">${c >= 0 ? '▲' : '▼'}</b> ${esc(k)} ${esc(v)}`).join('　');
+}
+async function runLadder(date) {
+  $('#ld-msg').textContent = '加载中…';
+  try {
+    const d = await api('/api/ladder?' + new URLSearchParams({ date: date || $('#ld-date').value || '', kind: LD.kind }));
+    LD.data = d; $('#ld-date').value = d.date; $('#ld-msg').textContent = '';
+    if (LD.theme && !d.rows.some(r => r.theme === LD.theme)) LD.theme = null;
+    drawLadder();
+  } catch (e) { $('#ld-msg').textContent = e.message; $('#ld-board').innerHTML = ''; $('#ld-focus').innerHTML = ''; }
+}
+function ldSort(rows) {
+  const by = $('#ld-sort').value, heat = {};
+  rows.forEach(r => heat[r.theme] = (heat[r.theme] || 0) + 1);
+  const f = {
+    prob: (a, b) => (b.prob ?? -1) - (a.prob ?? -1),
+    seal: (a, b) => sealKey(a).localeCompare(sealKey(b)),
+    turn: (a, b) => (b.tags.turn ?? -1) - (a.tags.turn ?? -1),
+    theme: (a, b) => (heat[b.theme] || 0) - (heat[a.theme] || 0) || String(a.theme).localeCompare(String(b.theme)) || (b.prob ?? -1) - (a.prob ?? -1),
+  }[by];
+  return rows.slice().sort(f);
+}
+function ldCard(r, fail) {
+  const c = themeColor(r.theme), t = r.tags || {};
+  let res = '';
+  if (fail) res = `<span class="t no">断板 ${pct(r.pct, 1)}</span>`;
+  else if (r.nxt_zt === 1) res = '<span class="t ok">次日晋级</span>';
+  else if (r.nxt_zt === 0) res = `<span class="t no">次日 ${pct(r.nxt_pct, 1)}</span>`;
+  const seal = LD.kind === 'dt' ? '' : (t.first ? `首封 ${t.first}` : '首封 --');
+  return `<div class="ld-card${fail ? ' fail' : ''}" style="--c:${c}" data-code="${r.code}" data-name="${esc(r.name)}">
+    <div class="r1"><span class="nm">${esc(r.name)}</span>${LD.kind === 'zt' ? `<span class="pp" style="color:${probColor(r.prob)}">${probTxt(r.prob)}</span>` : ''}</div>
+    <div class="r2"><span class="tt">${esc(r.theme || '无热门题材')}</span><span class="seal">${seal}</span></div>
+    <div class="r3">${t.yizi ? '<span class="t yz">一字</span>' : ''}${t.tzi ? '<span class="t tz">T字</span>' : ''}${t.cy ? '<span class="t cy">创</span>' : ''}${t.opens ? `<span class="t op">开板${t.opens}次</span>` : ''}${res}${t.nm ? `<span class="t nmz">${t.nm}</span>` : ''}</div>
+    ${LD.kind === 'zt' ? `<div class="pb"><i style="width:${Math.round((r.prob || 0) * 100)}%;background:${probColor(r.prob)}"></i></div>` : ''}
+  </div>`;
+}
+function drawLadder() {
+  const d = LD.data, zt = LD.kind === 'zt';
+  // 题材筛选
+  const cnt = {};
+  d.rows.forEach(r => { if (r.theme) cnt[r.theme] = (cnt[r.theme] || 0) + 1; });
+  const ths = Object.entries(cnt).sort((a, b) => b[1] - a[1]);
+  const chip = ([t, n]) => `<span class="ld-chip${LD.theme === t ? ' on' : ''}" style="--c:${themeColor(t)}" data-t="${esc(t)}">${esc(t)} ${n}</span>`;
+  $('#ld-themes').innerHTML = `<span class="ld-chip${LD.theme ? '' : ' on'}" style="--c:#5b8cff" data-t="">全部题材</span>${ths.slice(0, 6).map(chip).join('')}
+    ${ths.length > 6 ? `<details class="ld-more"><summary>更多 (${ths.length - 6}) ▾</summary><div class="pop">${ths.slice(6).map(chip).join('')}</div></details>` : ''}`;
+  const e = d.emotion;
+  $('#ld-emo').innerHTML = e ? `${phaseTag(e.phase)} 水温 ${num(e.temp, 0)}` : '';
+  const rows = d.rows.filter(r => !LD.theme || r.theme === LD.theme);
+  const fails = $('#ld-failed').checked && zt ? d.failed.filter(r => !LD.theme || r.theme === LD.theme) : [];
+  // 二进三 重点面板
+  if (zt) {
+    const two = rows.filter(r => r.board === 2).sort((a, b) => (b.prob ?? -1) - (a.prob ?? -1));
+    const ev = (d.eval || {})['二板'] || {};
+    const base = ev.base, t1 = ev.top1 || {};
+    $('#ld-focus').innerHTML = `<div class="ld-panel"><h4>二进三候选<span class="sub">今天的二板，按明天晋级三板的概率排序</span></h4>
+      ${two.length ? `<table class="ld-rank"><thead><tr><th>#</th><th>名称</th><th>题材</th><th>晋级概率</th><th>首封</th><th>开板</th><th>换手</th><th>主要理由</th>${two.some(r => r.nxt_zt != null) ? '<th>次日</th>' : ''}</tr></thead><tbody>
+      ${two.map((r, i) => `<tr data-code="${r.code}" data-name="${esc(r.name)}"><td>${i + 1}</td><td>${esc(r.name)}</td><td style="color:${themeColor(r.theme)}">${esc(r.theme || '-')}</td>
+        <td><span class="ld-pbar"><i style="width:${Math.round((r.prob || 0) * 100)}%;background:${probColor(r.prob)}"></i></span><b style="color:${probColor(r.prob)}">${probTxt(r.prob)}</b></td>
+        <td>${r.tags.first || '--'}</td><td>${r.tags.opens ?? '--'}</td><td>${r.tags.turn == null ? '--' : r.tags.turn.toFixed(1) + '%'}</td><td class="why">${whyHtml(r.why, 4)}</td>
+        ${r.nxt_zt != null ? `<td>${r.nxt_zt ? '<span class="t ok">晋级</span>' : `<span class="t no">${pct(r.nxt_pct, 1)}</span>`}</td>` : (two.some(x => x.nxt_zt != null) ? '<td></td>' : '')}</tr>`).join('')}</tbody></table>`
+      : '<div class="ld-msg">今天没有二板股</div>'}</div>
+      <div class="ld-panel ld-stat"><h4>二进三模型 · 样本外</h4>
+      ${ev.n ? `历史二板 <b>${ev.n}</b> 次，平均晋级率 <b>${pct(base, 1)}</b><br>
+        区分度 AUC <b>${num(ev.auc, 2)}</b>（0.5 = 瞎猜）<br>
+        每天只挑概率最高的一只：晋级率 <b>${pct(t1.rate, 1)}</b>（${t1.days || 0} 天）<br>
+        前三名合计晋级率 <b>${pct((ev.top3 || {}).rate, 1)}</b><br>
+        ${ev.use_intra ? '已使用分时封板特征' : `<span style="color:#ff9f43">未使用分时封板特征（覆盖率 ${pct(ev.intra_cover, 0)}），可在「数据」页补全</span>`}`
+        : '历史样本不足，暂时没有样本外结果'}
+      <div style="margin-top:6px"><button class="ld-btn" onclick="openLadderModel()">看校准、打板收益和权重</button></div></div>`;
+  } else $('#ld-focus').innerHTML = '';
+  // 天梯
+  const levels = {};
+  rows.forEach(r => (levels[r.board] = levels[r.board] || []).push(r));
+  fails.forEach(r => (levels[r.board] = levels[r.board] || []).push({ ...r, _fail: true }));
+  const ks = Object.keys(levels).map(Number).sort((a, b) => b - a);
+  const top = ks[0];
+  $('#ld-board').innerHTML = ks.map(b => {
+    const list = levels[b], act = list.filter(x => !x._fail), fl = list.filter(x => x._fail);
+    const pr = d.promo[b];
+    const lbl = zt ? (b === 1 ? '首板' : `${b} 板`) : (b === 1 ? '首次跌停' : `${b} 连跌停`);
+    return `<div class="ld-level${zt && b === 2 ? ' focus' : ''}"><div class="ld-lv"><div class="h${b === top && zt ? ' top' : ''}">${lbl}</div><div class="n">${act.length} 只${fl.length ? ` · 淘汰 ${fl.length}` : ''}</div>
+      ${zt && pr && b > 1 ? `<div class="pr">今日 ${b - 1}进${b}：${act.length}/${pr.from}（${pct(act.length / pr.from, 0)}）</div>` : ''}
+      ${zt && b === 2 ? '<div class="fx">二进三重点</div>' : ''}</div>
+      <div class="ld-cards">${ldSort(act).map(r => ldCard(r)).join('')}${fl.map(r => ldCard(r, true)).join('')}</div></div>`;
+  }).join('') || `<div class="ld-msg" style="padding:20px">${zt ? '今天没有涨停股' : '今天没有跌停股'}</div>`;
+}
+window.openLadderModel = async () => {
+  $('#ld-model').style.display = 'flex';
+  const ev = await api('/api/ladder/eval');
+  $('#ld-model-body').innerHTML = ['二板', '首板', '三板+'].filter(k => ev[k]).map(k => {
+    const v = ev[k];
+    if (!v.calib) return `<div class="seg"><h4>${k}</h4><div class="muted">样本外数据不足</div></div>`;
+    return `<div class="seg"><h4>${k === '二板' ? '二进三（二板模型）' : k}<span class="muted" style="font-weight:400;font-size:12px">　样本外 ${v.n} 次 · 平均晋级率 ${pct(v.base, 1)} · AUC ${num(v.auc, 2)} · 每天最高概率一只晋级率 ${pct(v.top1.rate, 1)}${v.use_intra ? ' · 含分时特征' : ''}</span></h4>
+      <div class="cols"><div><div id="ld-cal-${k}" class="chart" style="height:220px;border:none"></div><div class="muted" style="font-size:12px">按预测概率从低到高分 10 组：柱子是实际晋级率，线是平均预测概率。两者贴近说明概率可信。</div></div>
+      <div><table class="grid"><thead><tr><th class="l">预测概率</th><th>次数</th><th>实际晋级率</th><th>打板次数</th><th>打板次日开盘卖</th><th>打板胜率</th></tr></thead><tbody>
+      ${v.dab.map(x => `<tr><td class="l">${pct(x.p_lo, 0)} ~ ${pct(x.p_hi, 0)}</td><td>${x.n}</td><td>${pct(x.rate, 1)}</td><td>${x.trades}</td><td>${pct(x.dab)}</td><td>${pct(x.dab_win, 0)}</td></tr>`).join('')}</tbody></table>
+      <div class="muted" style="font-size:12px;margin-top:4px">打板 = 次日盘中摸到涨停价就以涨停价买入（一字板买不到不算），第三天开盘卖出，含手续费和滑点；摸板后炸板的亏损也算在内。</div>
+      <h4 style="margin-top:10px">权重（标准化后，正数 = 提高晋级概率）</h4>
+      <div>${(v.coef || []).slice(0, 14).map(c => `<span class="tag${c.w >= 0 ? '' : ' sell'}">${c.label} ${c.w > 0 ? '+' : ''}${c.w.toFixed(2)}</span>`).join(' ')}</div></div></div></div>`;
+  }).join('') || '<div class="muted">还没有模型结果</div>';
+  ['二板', '首板', '三板+'].forEach(k => {
+    const el = document.getElementById('ld-cal-' + k), v = ev[k];
+    if (!el || !v.calib) return;
+    echarts.init(el, THEME).setOption({ grid: { left: 40, right: 10, top: 10, bottom: 24 }, tooltip: { trigger: 'axis', valueFormatter: x => (x * 100).toFixed(1) + '%' },
+      xAxis: { type: 'category', data: v.calib.map((_, i) => i + 1) }, yAxis: { type: 'value', max: 1, axisLabel: { formatter: x => x * 100 + '%' } },
+      series: [{ name: '实际晋级率', type: 'bar', data: v.calib.map(c => c.rate), color: UP }, { name: '平均预测概率', type: 'line', data: v.calib.map(c => c.p), color: '#6f95ff' }] });
+  });
+};
+$('#ld-model-btn').onclick = () => openLadderModel();
+$('#ld-model-close').onclick = () => $('#ld-model').style.display = 'none';
+$('#ld-model').onclick = e => { if (e.target.id === 'ld-model') $('#ld-model').style.display = 'none'; };
+$('#ld-kind').onclick = e => { const b = e.target.closest('button'); if (!b) return; LD.kind = b.dataset.k; document.querySelectorAll('#ld-kind button').forEach(x => x.classList.toggle('on', x === b)); runLadder(); };
+$('#ld-sort').onchange = () => LD.data && drawLadder();
+$('#ld-failed').onchange = () => LD.data && drawLadder();
+$('#ld-date').onchange = () => runLadder();
+$('#ld-prev').onclick = () => LD.data && LD.data.prev && runLadder(LD.data.prev);
+$('#ld-next').onclick = () => LD.data && LD.data.next && runLadder(LD.data.next);
+$('#ld-themes').onclick = e => { const c = e.target.closest('.ld-chip'); if (!c) return; LD.theme = c.dataset.t || null; drawLadder(); };
+function ldFind(code) { return LD.data && (LD.data.rows.find(r => r.code === code) || LD.data.failed.find(r => r.code === code)); }
+$('#page-ladder').addEventListener('click', e => {
+  const el = e.target.closest('.ld-card, .ld-rank tr[data-code]');
+  if (!el) return;
+  const r = ldFind(el.dataset.code);
+  const extra = r && r.why && r.why.length ? `<div style="margin-bottom:6px">晋级概率 <b>${probTxt(r.prob)}</b>：${whyHtml(r.why)}</div>` : '';
+  openModal(el.dataset.code, LD.data.date, el.dataset.name, extra);
+});
+$('#page-ladder').addEventListener('mousemove', e => {
+  const el = e.target.closest('.ld-card'), tip = $('#ld-tip');
+  if (!el || LD.kind !== 'zt') { tip.style.display = 'none'; return; }
+  const r = ldFind(el.dataset.code);
+  if (!r) { tip.style.display = 'none'; return; }
+  tip.innerHTML = `<div class="hd">${esc(r.name)} ${r.code} · 晋级概率 ${probTxt(r.prob)}</div>
+    ${r.why && r.why.length ? `<table>${r.why.map(([k, v, c]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td><td class="${c >= 0 ? 'pos' : 'neg'}">${c >= 0 ? '▲ 加分' : '▼ 减分'}</td></tr>`).join('')}</table>` : '<div class="muted">没有模型结果（历史样本不足）</div>'}
+    <div style="color:#6b7585;margin-top:4px">${r.tags && r.tags.last ? `最后回封 ${r.tags.last} · ` : ''}点击看缠论结构</div>`;
+  tip.style.display = 'block';
+  const x = Math.min(e.clientX + 14, window.innerWidth - 360), y = Math.min(e.clientY + 14, window.innerHeight - tip.offsetHeight - 10);
+  tip.style.left = x + 'px'; tip.style.top = y + 'px';
+});
+$('#page-ladder').addEventListener('mouseleave', () => $('#ld-tip').style.display = 'none');
+pages.ladder = { show() { if (!LD.data) runLadder(); } };
 
 // ------------------------------------------------------------ 复盘回放
 const rpChart = chanChart($('#rp-chart'));
@@ -371,19 +524,19 @@ $('#va-run').onclick = async () => {
       <div class="section"><h4>历史选股明细（最近 ${d.picks.length} 条，点击查看当时的缠论图）</h4><div class="tablewrap" style="max-height:420px">
       <table class="grid" id="va-picks"><thead><tr>${pickHead}</tr></thead>
       <tbody>${d.picks.map(p => `<tr data-code="${p.code}" data-date="${p.date}" data-name="${esc(p.name)}">${pickRow(p)}</tr>`).join('')}</tbody></table></div></div>`;
-    const m = echarts.init($('#va-month'));
+    const m = echarts.init($('#va-month'), THEME);
     m.setOption({ tooltip: { trigger: 'axis', valueFormatter: v => v == null ? '-' : (v * 100).toFixed(2) + '%' }, legend: { top: 0 },
       grid: { left: 50, right: 20, top: 30, bottom: 30 }, xAxis: { type: 'category', data: d.by_month.map(x => x.key) },
       yAxis: { type: 'value', axisLabel: { formatter: v => (v * 100).toFixed(0) + '%' } },
       series: [{ name: `选股${hm}日平均`, type: 'bar', color: UP, data: d.by_month.map(x => ({ value: x['avg' + hm], itemStyle: { color: x['avg' + hm] >= 0 ? UP : DOWN } })) },
-               { name: '沪深300 同期', type: 'line', color: '#2f5bea', data: d.by_month.map(x => x['bench' + hm]), symbol: 'none', lineStyle: { color: '#2f5bea' } }] });
+               { name: '沪深300 同期', type: 'line', color: '#6f95ff', data: d.by_month.map(x => x['bench' + hm]), symbol: 'none', lineStyle: { color: '#6f95ff' } }] });
     $('#va-picks').onclick = e => { const tr = e.target.closest('tr[data-code]'); if (tr) openModal(tr.dataset.code, tr.dataset.date, tr.dataset.name); };
   } catch (e) { $('#va-result').innerHTML = `<div class="down">${e.message}</div>`; }
 };
 
 // ------------------------------------------------------------ 弹窗：某天的缠论图
 let modalChart = null;
-async function openModal(code, date, name) {
+async function openModal(code, date, name, extra = '') {
   $('#modal').style.display = 'flex';
   $('#modal-title').textContent = `${name || ''} ${code} · 截至 ${date} 的缠论结构（只用到当天的数据）`;
   if (!modalChart) modalChart = chanChart($('#modal-chart'));
@@ -392,7 +545,7 @@ async function openModal(code, date, name) {
     const d = await api(`/api/chart?code=${code}&date=${date}`);
     modalChart.render(d.chart.day, { markDate: date, zoomStart: 40, resetZoom: true });
     const sig = d.signals.filter(s => s.detect_date <= date).slice(0, 8);
-    $('#modal-info').innerHTML = '近期信号：' + sig.map(s => `<span class="tag ${s.buy ? '' : 'sell'}">${s.detect_date} ${sigName(s.types, s.buy)}${s.score ? ' ' + num(s.score, 0) + '分' : ''}</span>`).join('');
+    $('#modal-info').innerHTML = extra + '近期信号：' + sig.map(s => `<span class="tag ${s.buy ? '' : 'sell'}">${s.detect_date} ${sigName(s.types, s.buy)}${s.score ? ' ' + num(s.score, 0) + '分' : ''}</span>`).join('');
   } catch (e) { $('#modal-info').textContent = e.message; }
 }
 $('#modal-close').onclick = () => $('#modal').style.display = 'none';
@@ -433,7 +586,7 @@ $('#bt-run').onclick = async () => {
       <thead><tr><th class="l">代码</th><th class="l">名称</th><th class="l">模式/买点</th><th class="l">题材</th><th>评分</th><th>买入日</th><th>买入价</th><th>卖出日</th><th>卖出价</th><th>持有</th><th class="l">原因</th><th>收益</th></tr></thead>
       <tbody>${d.trades.map(t => `<tr data-code="${t.code}" data-date="${t.buy_date}" data-name="${esc(t.name)}"><td class="l mono">${t.code}</td><td class="l">${esc(t.name)}</td><td class="l">${t.mode === '缠论' ? typesCN(t.types) : t.mode}</td><td class="l">${esc(t.theme || '')}</td><td>${num(t.score, 0)}</td>
       <td>${t.buy_date}</td><td>${num(t.buy_price)}</td><td>${t.sell_date}</td><td>${num(t.sell_price)}</td><td>${t.days}</td><td class="l">${t.reason}</td><td>${pct(t.ret)}</td></tr>`).join('')}</tbody></table></div></div>`;
-    const ch = echarts.init($('#bt-curve'));
+    const ch = echarts.init($('#bt-curve'), THEME);
     const cv = d.curve;
     ch.setOption({ animation: false, tooltip: { trigger: 'axis' }, legend: { top: 0 },
       axisPointer: { link: [{ xAxisIndex: 'all' }] },
@@ -444,7 +597,7 @@ $('#bt-run').onclick = async () => {
       dataZoom: [{ type: 'inside', xAxisIndex: [0, 1] }, { type: 'slider', xAxisIndex: [0, 1], height: 14, bottom: 0 }],
       series: [{ name: '策略净值', type: 'line', color: UP, data: cv.equity, symbol: 'none', lineStyle: { color: UP, width: 1.6 },
                  markArea: { silent: true, data: phaseBands(cv.dates, cv.phase || []) } },
-               { name: '沪深300', type: 'line', color: '#2f5bea', data: cv.bench, symbol: 'none', lineStyle: { color: '#2f5bea', width: 1.2 } },
+               { name: '沪深300', type: 'line', color: '#6f95ff', data: cv.bench, symbol: 'none', lineStyle: { color: '#6f95ff', width: 1.2 } },
                { name: '回撤', type: 'line', color: DOWN, xAxisIndex: 1, yAxisIndex: 1, data: cv.drawdown, symbol: 'none', areaStyle: { color: 'rgba(19,160,91,.25)' }, lineStyle: { width: 0 } }] });
     $('#bt-trades').onclick = e => { const tr = e.target.closest('tr[data-code]'); if (tr) openModal(tr.dataset.code, prevDay(tr.dataset.date), tr.dataset.name); };
   } catch (e) { $('#bt-result').innerHTML = `<div class="down">${e.message}</div>`; }
@@ -470,7 +623,7 @@ async function refreshData() {
     $('#dt-ptext').textContent = `${p.running ? '运行中' : (p.ok ? '已完成' : '已结束')} · ${p.stage || ''} ${p.total ? `${p.done}/${p.total}` : ''} · 用时 ${Math.floor((p.elapsed || 0) / 60)} 分 ${(p.elapsed || 0) % 60} 秒 ${p.running ? '' : '· ' + (p.msg || '')}`;
   }
   try { $('#dt-log').textContent = (await api('/api/log')).join('\n'); } catch (_) {}
-  $('#dt-update').disabled = $('#dt-signals').disabled = $('#dt-emotion').disabled = $('#dt-themes').disabled = !!s.running;
+  $('#dt-update').disabled = $('#dt-signals').disabled = $('#dt-emotion').disabled = $('#dt-themes').disabled = $('#dt-seals').disabled = !!s.running;
   if (s.running && !dtTimer) dtTimer = setInterval(refreshData, 2000);
   if (!s.running && dtTimer) { clearInterval(dtTimer); dtTimer = null; }
 }
@@ -482,6 +635,7 @@ $('#dt-update').onclick = () => startJob('update');
 $('#dt-signals').onclick = () => startJob('signals');
 $('#dt-emotion').onclick = () => startJob('emotion');
 $('#dt-themes').onclick = () => startJob('themes');
+$('#dt-seals').onclick = () => startJob('seals');
 pages.data = { show: refreshData };
 
 // ------------------------------------------------------------ 初始化
