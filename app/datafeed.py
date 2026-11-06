@@ -5,7 +5,9 @@
 """
 import datetime as dt
 import hashlib
+import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from functools import lru_cache
 
 import numpy as np
 import pandas as pd
@@ -14,7 +16,7 @@ from . import db
 from .settings import BENCHMARK, DATA_START, DOWNLOAD_WORKERS, MOCK
 
 BOARD_PREFIX = ("sh.60", "sh.68", "sz.00", "sz.30")
-DAY_FIELDS = "date,open,high,low,close,volume,amount,turn,tradestatus,isST"
+DAY_FIELDS = "date,open,high,low,close,volume,amount,turn,tradestatus,isST,pctChg"
 
 
 def today():
@@ -87,7 +89,12 @@ def bs_30m(code, start, end):
 
 
 # ---------------------------------------------------------------- mock
-MOCK_N = 80
+# 合成行情：所有股票共享一个“情绪周期”（低位 → 主升 → 退潮），每轮有两个活跃题材，
+# 活跃题材里的股票更容易涨停、连板；退潮时被炒作过的股票容易跌停。只用于离线测试。
+MOCK_N = int(os.environ.get("CHAN_DESK_MOCK_N", 160))
+MOCK_THEMES = ["AI算力", "机器人", "低空经济", "固态电池", "创新药", "半导体",
+               "光伏", "军工", "消费电子", "数据要素", "卫星互联网", "有色金属"]
+_WORLD_DAYS = 6000
 
 
 def _mock_days(start, end):
@@ -95,44 +102,103 @@ def _mock_days(start, end):
     return [d.strftime("%Y-%m-%d") for d in days]
 
 
+@lru_cache(None)
+def _mock_world():
+    rng = np.random.default_rng(7)
+    s = np.zeros(_WORLD_DAYS)
+    active = np.zeros((_WORLD_DAYS, 2), int)
+    i = 0
+    while i < _WORLD_DAYS:
+        n = int(rng.integers(50, 110))
+        seg = np.sin(np.linspace(-np.pi / 2, 1.5 * np.pi, n)) * rng.uniform(0.6, 1.0)
+        s[i:i + n] = seg[:_WORLD_DAYS - i]
+        active[i:i + n] = rng.choice(len(MOCK_THEMES), 2, replace=False)
+        i += n
+    return s + rng.normal(0, 0.08, _WORLD_DAYS), active
+
+
+def mock_themes_of(code):
+    rng = np.random.default_rng(int(hashlib.md5((code + "t").encode()).hexdigest()[:8], 16))
+    return sorted(set(int(x) for x in rng.choice(len(MOCK_THEMES), int(rng.integers(1, 4)), replace=False)))
+
+
 def _mock_series(code, days):
+    from .limits import limit_pct
     seed = int(hashlib.md5(code.encode()).hexdigest()[:8], 16)
     rng = np.random.default_rng(seed)
+    world, active = _mock_world()
+    mine = set(mock_themes_of(code))
     p = 5 + rng.random() * 40
     drift = rng.normal(0.0002, 0.0006)
     out = []
     regime = 0.0
-    for d in days:
+    board, hype = 0, 0
+    for k, d in enumerate(days):
+        sk = world[k]
+        hot = max(sk, 0.0)
+        act = bool(mine & set(active[k]))
+        lim = limit_pct(code, d)
         if rng.random() < 0.02:
             regime = rng.normal(0, 0.004)
-        r = rng.normal(drift + regime, 0.022)
-        r = max(min(r, 0.099), -0.099)
+        if board > 0:
+            p_zt = 0.10 + hot * (0.55 if act else 0.25)
+        else:
+            p_zt = 0.002 + 0.006 * hot + (0.05 * hot if act else 0.0)
+        p_dt = 0.001 + (0.08 if hype > 0 else 0.006) * max(-sk, 0.0)
+        u = rng.random()
         o = p * (1 + rng.normal(0, 0.006))
-        c = p * (1 + r)
-        h = max(o, c) * (1 + abs(rng.normal(0, 0.008)))
-        lo = min(o, c) * (1 - abs(rng.normal(0, 0.008)))
-        v = float(rng.integers(2e5, 5e6)) * (1 + abs(r) * 10)
-        out.append((d, round(o, 2), round(h, 2), round(lo, 2), round(c, 2), v, v * c, rng.random() * 5))
+        if u < p_zt:
+            c = round(p * (1 + lim), 2)
+            o = min(o, c)
+            h = c
+            lo = min(o, c) * (1 - abs(rng.normal(0, 0.01)))
+            board += 1
+        elif u < p_zt + p_dt:
+            c = round(p * (1 - lim), 2)
+            o = max(o, c)
+            h = max(o, c) * (1 + abs(rng.normal(0, 0.005)))
+            lo = c
+            board = 0
+        else:
+            r = rng.normal(drift + regime + 0.004 * sk, 0.022)
+            r = max(min(r, lim - 0.012), -lim + 0.012)
+            c = round(p * (1 + r), 2)
+            h = max(o, c) * (1 + abs(rng.normal(0, 0.008)))
+            if rng.random() < p_zt * 0.4:      # 炸板：盘中摸过涨停
+                h = round(p * (1 + lim), 2)
+            h = min(h, round(p * (1 + lim), 2))
+            lo = max(min(o, c) * (1 - abs(rng.normal(0, 0.008))), round(p * (1 - lim), 2))
+            board = 0
+        hype = 15 if board >= 2 else max(hype - 1, 0)
+        o = min(max(o, lo), h)
+        v = float(rng.integers(2e5, 5e6)) * (1 + abs(c / p - 1) * 10)
+        out.append((d, round(o, 2), round(h, 2), round(lo, 2), c, v, v * c, rng.random() * 5,
+                    round((c / p - 1) * 100, 4)))
         p = c
-    return pd.DataFrame(out, columns=["date", "open", "high", "low", "close", "volume", "amount", "turn"])
+    return pd.DataFrame(out, columns=["date", "open", "high", "low", "close", "volume", "amount", "turn", "pctChg"])
 
 
 def mock_stock_list():
     res = []
     for i in range(MOCK_N):
-        code = f"sh.60{i:04d}" if i % 2 == 0 else f"sz.00{i:04d}"
-        res.append((code, f"模拟股票{i:02d}", "2010-01-01"))
+        code = f"sh.60{i:04d}" if i % 3 == 0 else (f"sz.00{i:04d}" if i % 3 == 1 else f"sz.30{i:04d}")
+        res.append((code, f"模拟股票{i:03d}", "2010-01-01"))
     return res
 
 
 def mock_daily(code, start, end, index=False):
     days = _mock_days(DATA_START, end)
-    df = _mock_series(code, days)
-    df = df[(df["date"] >= start) & (df["date"] <= end)].copy()
-    if not index:
+    if index:
+        rng = np.random.default_rng(300)
+        world, _ = _mock_world()
+        r = rng.normal(0.0002, 0.011, len(days)) + 0.002 * world[:len(days)]
+        c = 3500 * np.cumprod(1 + r)
+        df = pd.DataFrame({"date": days, "open": c, "high": c * 1.005, "low": c * 0.995, "close": c})
+    else:
+        df = _mock_series(code, days)
         df["tradestatus"] = "1"
-        df["isST"] = "0"
-    return df
+        df["isST"] = "1" if code in ("sh.600003", "sz.000004") else "0"
+    return df[(df["date"] >= start) & (df["date"] <= end)].copy()
 
 
 def mock_30m(code, start, end):
@@ -143,14 +209,11 @@ def mock_30m(code, start, end):
     for r in daily.itertuples():
         path = np.linspace(r.open, r.close, 9)[1:] * (1 + rng.normal(0, 0.003, 8))
         prev = r.open
-        for s, c in zip(slots, path):
+        for s_, c in zip(slots, path):
             c = min(max(c, r.low), r.high)
-            rows.append((f"{r.date} {s}", prev, max(prev, c), min(prev, c), c, r.volume / 8))
+            rows.append((f"{r.date} {s_}", prev, max(prev, c), min(prev, c), c, r.volume / 8))
             prev = c
-    df = pd.DataFrame(rows, columns=["time", "open", "high", "low", "close", "volume"])
-    for d, g in df.groupby(df["time"].str[:10]):
-        pass
-    return df
+    return pd.DataFrame(rows, columns=["time", "open", "high", "low", "close", "volume"])
 
 
 stock_list = mock_stock_list if MOCK else bs_stock_list
@@ -162,7 +225,7 @@ fetch_30m = mock_30m if MOCK else bs_30m
 def _update_one(args):
     code, last_date, last_close, end = args
     try:
-        if last_date:
+        if last_date and last_close is not None:
             df = fetch_daily(code, last_date, end)
             if not df.empty and df.iloc[0]["date"] == last_date and last_close:
                 if abs(float(df.iloc[0]["close"]) - last_close) > max(0.011, last_close * 1e-4):
@@ -183,11 +246,15 @@ def _save_daily(conn, code, df, full):
         conn.execute("UPDATE stocks SET is_st=? WHERE code=?", (is_st, code))
     df = df.dropna(subset=["open", "high", "low", "close"])
     df = df[(df["high"] > 0) & (df["low"] > 0)]
+    pct = (pd.to_numeric(df["pctChg"], errors="coerce") / 100) if "pctChg" in df else pd.Series(None, index=df.index)
+    st = (df["isST"] == "1").astype(int) if "isST" in df else pd.Series(0, index=df.index)
     if full:
         conn.execute("DELETE FROM kline_d WHERE code=?", (code,))
     conn.executemany(
-        "INSERT OR REPLACE INTO kline_d VALUES(?,?,?,?,?,?,?,?,?)",
-        [(code, r.date, r.open, r.high, r.low, r.close, r.volume, r.amount, r.turn) for r in df.itertuples()],
+        "INSERT OR REPLACE INTO kline_d(code,date,open,high,low,close,volume,amount,turn,pct_chg,is_st) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        [(code, r.date, r.open, r.high, r.low, r.close, r.volume, r.amount, r.turn,
+          None if pd.isna(pc) else float(pc), int(si)) for r, pc, si in zip(df.itertuples(), pct, st)],
     )
     row = conn.execute("SELECT MAX(date), COUNT(*) FROM kline_d WHERE code=?", (code,)).fetchone()
     conn.execute("UPDATE stocks SET last_date=?, bars=? WHERE code=?", (row[0], row[1], code))
@@ -202,8 +269,9 @@ def update_market(progress=lambda *a, **k: None, end=None):
     with db.session() as c:
         c.executemany("INSERT OR IGNORE INTO stocks(code,name,ipo_date) VALUES(?,?,?)", lst)
         c.executemany("UPDATE stocks SET name=? WHERE code=?", [(n, code) for code, n, _ in lst])
-        known = {r[0]: (r[1], r[2]) for r in c.execute(
-            "SELECT s.code, s.last_date, k.close FROM stocks s LEFT JOIN kline_d k "
+        # 最后一根K线没有涨跌幅（旧版本下载的）→ 视为需要整只重新下载
+        known = {r[0]: (r[1] if r[3] is not None else None, r[2] if r[3] is not None else None) for r in c.execute(
+            "SELECT s.code, s.last_date, k.close, k.pct_chg FROM stocks s LEFT JOIN kline_d k "
             "ON k.code=s.code AND k.date=s.last_date")}
     # 基准指数 + 交易日历
     progress("stage", "下载基准指数")

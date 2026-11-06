@@ -1,7 +1,9 @@
 """后台任务：更新行情 + 全市场逐根回放生成时点信号。
 
-命令行：python -m app.jobs update        （下载数据并重算信号）
-       python -m app.jobs signals       （只重算信号）
+命令行：python -m app.jobs update        （下载数据、刷新题材、重算缠论信号和情绪周期）
+       python -m app.jobs signals       （只重算缠论信号和情绪周期）
+       python -m app.jobs emotion       （只重算情绪周期）
+       python -m app.jobs themes        （强制重新下载题材成分，再重算情绪周期）
 """
 import datetime as dt
 import json
@@ -11,7 +13,7 @@ import time
 import traceback
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-from . import datafeed, db
+from . import datafeed, db, emotion, themes
 from .settings import LOG_PATH, PROGRESS_PATH, SCAN_WORKERS, SIGNAL_START
 
 
@@ -104,11 +106,23 @@ def main(argv):
     p = Progress()
     try:
         db.init_db()
+        msg = []
         if cmd == "update":
             latest, errs = datafeed.update_market(p)
             p.log(f"行情更新完成，最新交易日 {latest}，失败 {len(errs)} 只")
-        n, errs = build_signals(p)
-        p.finish(True, f"完成：共 {n} 条信号，计算失败 {len(errs)} 只")
+        if cmd in ("update", "themes"):
+            try:
+                src, nt = themes.update_themes(p, force=cmd == "themes")
+                p.log(f"题材库：{src}，{nt} 个题材")
+            except Exception as e:  # noqa  题材失败不影响缠论部分
+                p.log(f"题材更新失败：{e}")
+        if cmd in ("update", "signals"):
+            n, errs = build_signals(p)
+            msg.append(f"共 {n} 条缠论信号，计算失败 {len(errs)} 只")
+        k = emotion.build(p)
+        last = (db.get_meta("last_emotion_build") or {}).get("phase")
+        msg.append(f"情绪周期已更新（当前阶段：{last or '数据不足'}，{k} 条情绪选股记录）")
+        p.finish(True, "完成：" + "；".join(msg))
     except Exception as e:  # noqa
         p.log(traceback.format_exc())
         p.finish(False, f"出错：{e}")

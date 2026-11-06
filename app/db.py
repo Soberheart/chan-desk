@@ -34,7 +34,31 @@ CREATE TABLE IF NOT EXISTS signals(
 );
 CREATE INDEX IF NOT EXISTS ix_sig_detect ON signals(detect_date, is_buy);
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS themes(code TEXT, theme TEXT, source TEXT, PRIMARY KEY(code, theme)) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS emo_daily(
+    date TEXT PRIMARY KEY, phase TEXT, temp REAL, temp_raw REAL, cap REAL,
+    zt INTEGER, dt INTEGER, zb INTEGER, zb_rate REAL, height INTEGER, lb INTEGER,
+    promo1 REAL, promo_lb REAL, prev_zt_ret REAL, prev_lb_ret REAL, damian INTEGER,
+    hp_ret REAL, mid_ret REAL, kill INTEGER, up_ratio REAL, amount REAL,
+    note TEXT, ladder TEXT, mainline TEXT, old_themes TEXT
+);
+CREATE TABLE IF NOT EXISTS emo_theme(
+    date TEXT, theme TEXT, zt INTEGER, zt5 INTEGER, heat INTEGER, rank5 INTEGER,
+    leader TEXT, leader_board INTEGER, is_old INTEGER, is_new INTEGER, PRIMARY KEY(date, theme)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS emo_picks(
+    date TEXT, mode TEXT, code TEXT, theme TEXT, board INTEGER, score REAL, fit INTEGER, detail TEXT,
+    buyable INTEGER, oret1 REAL, oret3 REAL, oret5 REAL, oret10 REAL, mdd5 REAL,
+    PRIMARY KEY(date, mode, code)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS sig_emo(
+    code TEXT, date TEXT, phase TEXT, theme TEXT, theme_old INTEGER, theme_new INTEGER,
+    hyped INTEGER, maxb5 INTEGER, PRIMARY KEY(code, date)
+) WITHOUT ROWID;
 """
+
+# 旧库升级：kline_d 新增逐日涨跌幅与 ST 标记（空值的股票会在下次更新时整只重新下载）
+MIGRATIONS = {"kline_d": [("pct_chg", "REAL"), ("is_st", "INTEGER")]}
 
 
 def connect():
@@ -57,6 +81,11 @@ def session():
 def init_db():
     with session() as c:
         c.executescript(SCHEMA)
+        for table, cols in MIGRATIONS.items():
+            have = {r[1] for r in c.execute(f"PRAGMA table_info({table})")}
+            for name, typ in cols:
+                if name not in have:
+                    c.execute(f"ALTER TABLE {table} ADD COLUMN {name} {typ}")
 
 
 def set_meta(key, value):

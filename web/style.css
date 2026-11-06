@@ -1,6 +1,7 @@
 :root{
   --bg:#f5f6f8; --panel:#fff; --line:#e3e6eb; --text:#1f2329; --muted:#6b7280;
   --accent:#2f5bea; --up:#d93026; --down:#13a05b; --warn:#c77700;
+  --ph-low:#64748b; --ph-up:#d93026; --ph-high:#c77700; --ph-down:#13a05b;
 }
 *{box-sizing:border-box}
 body{margin:0;font:13px/1.5 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;color:var(--text);background:var(--bg)}
@@ -74,3 +75,24 @@ pre.log{white-space:pre-wrap;height:360px;margin:0}
 .check{cursor:pointer}
 .toolbar.wrap{row-gap:6px}
 h4{margin:4px 0 6px}
+
+/* 情绪周期 */
+.phase-banner{background:var(--panel);border:1px solid var(--line);border-left:6px solid var(--ph-low);border-radius:8px;padding:10px 14px;margin-bottom:10px}
+.phase-banner .ph{font-size:20px;font-weight:700;margin-right:12px}
+.phase-banner .meta{color:var(--muted);font-size:12px}
+.phase-banner .adv{margin-top:6px}
+.phase-banner.small{padding:6px 12px}
+.phase-banner.small .ph{font-size:15px}
+.ptag{display:inline-block;padding:0 7px;border-radius:10px;color:#fff;font-size:12px}
+.tag.old{background:#eef0f4;color:#6b7280}
+.tag.new{background:#e8eeff;color:var(--accent)}
+.tag.main{background:#fdecec;color:var(--up)}
+.tag.warn{background:#fff3e0;color:var(--warn)}
+.pick-cols{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+@media (max-width:1400px){.pick-cols{grid-template-columns:minmax(0,1fr)}}
+.pick-cols h5{margin:0 0 6px;font-size:13px}
+.pick-cols .rec{color:var(--up)}
+.ladder-row{display:flex;gap:8px;padding:4px 0;border-bottom:1px dashed #eceef2;align-items:baseline}
+.ladder-row b{min-width:42px;color:var(--up)}
+.ladder-row .stk{display:inline-block;margin-right:10px;cursor:pointer}
+.ladder-row .stk:hover{color:var(--accent)}
