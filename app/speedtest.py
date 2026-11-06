@@ -17,13 +17,28 @@ def log(s):
     OUT.write_text("\n".join(lines), encoding="utf-8")
 
 
-def t(name, fn):
+def t(name, fn, limit=60):
+    """每项最多等 limit 秒，超时就记为“超时”继续下一项。"""
+    import threading
     t0 = time.time()
-    try:
-        r = fn()
-        log(f"{name}: OK {time.time() - t0:.1f}s  {r}")
-    except Exception as e:  # noqa
-        log(f"{name}: FAIL {time.time() - t0:.1f}s  {type(e).__name__}: {str(e)[:200]}")
+    box = {}
+
+    def run():
+        try:
+            box["r"] = fn()
+        except Exception as e:  # noqa
+            box["e"] = e
+    th = threading.Thread(target=run, daemon=True)
+    th.start()
+    th.join(limit)
+    if th.is_alive():
+        log(f"{name}: 超时（{limit} 秒没有返回）")
+        return False
+    if "e" in box:
+        log(f"{name}: FAIL {time.time() - t0:.1f}s  {type(box['e']).__name__}: {str(box['e'])[:200]}")
+        return False
+    log(f"{name}: OK {time.time() - t0:.1f}s  {box['r']}")
+    return True
 
 
 def main():
@@ -31,17 +46,32 @@ def main():
     socket.setdefaulttimeout(30)
     log(f"测速开始 {dt.datetime.now():%Y-%m-%d %H:%M:%S}")
     end = dt.date.today().strftime("%Y-%m-%d")
+    # ---- akshare
+    try:
+        import akshare as ak
+        for code in ("600000", "000001", "300750"):
+            t(f"akshare 日线 {code}", lambda code=code: f"{len(ak.stock_zh_a_hist(symbol=code, period='daily', start_date='20190101', end_date=end.replace('-', ''), adjust='qfq'))} 根日线")
+        t("akshare 沪深300", lambda: f"{len(ak.stock_zh_index_daily_em(symbol='sh000300'))} 根")
+        t("akshare 股票列表", lambda: f"{len(ak.stock_info_a_code_name())} 只")
+        t("akshare 5分钟线", lambda: (lambda d: f"{len(d)} 根，最早 {d.iloc[0, 0] if len(d) else '-'}")(
+            ak.stock_zh_a_hist_min_em(symbol="600000", period="5", adjust="")))
+        t("akshare 概念板块列表", lambda: f"{len(ak.stock_board_concept_name_em())} 个")
+    except ImportError:
+        log("akshare 没有安装")
     # ---- baostock
     try:
         import baostock as bs
-        t("baostock 登录", lambda: bs.login().error_msg)
+        if not t("baostock 登录", lambda: bs.login().error_msg):
+            raise ImportError
         def qlist():
             rs = bs.query_stock_basic()
             n = 0
             while rs.error_code == "0" and rs.next():
                 n += 1
             return f"{n} 条"
-        t("baostock 股票列表", qlist)
+        if not t("baostock 股票列表", qlist):
+            log("baostock 太慢，跳过其余 baostock 测试")
+            raise ImportError
         for code in ("sh.600000", "sz.000001", "sz.300750"):
             def q(code=code):
                 rs = bs.query_history_k_data_plus(code, "date,close", start_date="2019-01-01", end_date=end,
@@ -62,19 +92,7 @@ def main():
         t("baostock 5分钟线", q5)
         t("baostock 退出", lambda: bs.logout() and "")
     except ImportError:
-        log("baostock 没有安装")
-    # ---- akshare
-    try:
-        import akshare as ak
-        for code in ("600000", "000001", "300750"):
-            t(f"akshare 日线 {code}", lambda code=code: f"{len(ak.stock_zh_a_hist(symbol=code, period='daily', start_date='20190101', end_date=end.replace('-', ''), adjust='qfq'))} 根日线")
-        t("akshare 沪深300", lambda: f"{len(ak.stock_zh_index_daily_em(symbol='sh000300'))} 根")
-        t("akshare 股票列表", lambda: f"{len(ak.stock_info_a_code_name())} 只")
-        t("akshare 5分钟线", lambda: (lambda d: f"{len(d)} 根，最早 {d.iloc[0, 0] if len(d) else '-'}")(
-            ak.stock_zh_a_hist_min_em(symbol="600000", period="5", adjust="")))
-        t("akshare 概念板块列表", lambda: f"{len(ak.stock_board_concept_name_em())} 个")
-    except ImportError:
-        log("akshare 没有安装")
+        pass
     log(f"测速结束 {dt.datetime.now():%H:%M:%S}")
 
 
