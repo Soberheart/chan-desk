@@ -25,7 +25,7 @@ function chips(el, items, onDefault = []) {
 }
 function toast(msg) { $('#statusbar').textContent = msg; }
 const MODES = [['龙头', '龙头'], ['补涨', '补涨'], ['切换', '切换']];
-const PHASE_COLOR = { '低位试错': '#64748b', '主升': '#d93026', '高位震荡': '#c77700', '主跌': '#13a05b' };
+const PHASE_COLOR = { '低位试错': '#7d8aa0', '主升': '#f0524a', '高位震荡': '#e0a030', '主跌': '#26b36e' };
 const phaseTag = p => p ? `<span class="ptag" style="background:${PHASE_COLOR[p] || '#999'}">${p}</span>` : '<span class="muted">-</span>';
 function phaseBanner(el, e, small) {
   if (!e || !e.phase) { el.style.display = 'none'; return; }
@@ -152,7 +152,7 @@ function phaseBands(dates, phases) {
   let s = 0;
   for (let i = 1; i <= dates.length; i++) {
     if (i === dates.length || phases[i] !== phases[s]) {
-      if (phases[s]) out.push([{ xAxis: dates[s], itemStyle: { color: PHASE_COLOR[phases[s]], opacity: 0.12 } }, { xAxis: dates[i - 1] }]);
+      if (phases[s]) out.push([{ xAxis: dates[s], itemStyle: { color: PHASE_COLOR[phases[s]], opacity: phases[s] === '低位试错' ? 0.05 : 0.16 } }, { xAxis: dates[i - 1] }]);
       s = i;
     }
   }
@@ -172,7 +172,7 @@ async function runEmotion(date, withSeries = true) {
 }
 function drawEmotionChart() {
   if (!emChart) {
-    emChart = echarts.init($('#em-chart'));
+    emChart = echarts.init($('#em-chart'), THEME);
     window.addEventListener('resize', () => emChart.resize());
     let hover = null;
     emChart.on('updateAxisPointer', e => { const a = (e.axesInfo || [])[0]; if (a) hover = a.value; });
@@ -189,15 +189,15 @@ function drawEmotionChart() {
       return `<b>${x.date}</b> ${x.phase}<br>水温 ${num(x.temp, 0)} · 最高 ${x.height} 板<br>涨停 ${x.zt} · 跌停 ${x.dt} · 炸板率 ${x.zb_rate == null ? '-' : (x.zb_rate * 100).toFixed(0) + '%'}<br>昨日涨停溢价 ${x.prev_zt_ret == null ? '-' : (x.prev_zt_ret * 100).toFixed(2) + '%'}${x.note ? '<br>' + esc(x.note) : ''}`; } },
     grid: [{ left: 50, right: 50, top: 30, height: '50%' }, { left: 50, right: 50, top: '66%', height: '24%' }],
     xAxis: [{ type: 'category', data: dates, axisLabel: { show: false } }, { type: 'category', gridIndex: 1, data: dates }],
-    yAxis: [{ min: 0, max: 100, name: '水温', splitLine: { lineStyle: { color: '#eef0f4' } } },
+    yAxis: [{ min: 0, max: 100, name: '水温', splitLine: { lineStyle: { color: '#202834' } } },
             { gridIndex: 1, name: '家数', splitLine: { show: false } }, { gridIndex: 1, name: '板数', position: 'right', splitLine: { show: false } }],
     dataZoom: [{ type: 'inside', xAxisIndex: [0, 1] }, { type: 'slider', xAxisIndex: [0, 1], height: 14, bottom: 0 }],
     series: [
-      { name: '水温', type: 'line', data: EM.map(x => x.temp), symbol: 'none', lineStyle: { color: '#1f2329', width: 1.4 }, color: '#1f2329',
+      { name: '水温', type: 'line', data: EM.map(x => x.temp), symbol: 'none', lineStyle: { color: '#e3e7ee', width: 1.4 }, color: '#e3e7ee',
         markArea: { silent: true, data: phaseBands(dates, EM.map(x => x.phase)) } },
       { name: '涨停', type: 'bar', xAxisIndex: 1, yAxisIndex: 1, data: EM.map(x => x.zt), color: UP, barMaxWidth: 4 },
       { name: '跌停', type: 'bar', xAxisIndex: 1, yAxisIndex: 1, data: EM.map(x => -x.dt), color: DOWN, barMaxWidth: 4, barGap: '-100%' },
-      { name: '最高板', type: 'line', xAxisIndex: 1, yAxisIndex: 2, data: EM.map(x => x.height), symbol: 'none', step: 'end', lineStyle: { color: '#2f5bea', width: 1 }, color: '#2f5bea' },
+      { name: '最高板', type: 'line', xAxisIndex: 1, yAxisIndex: 2, data: EM.map(x => x.height), symbol: 'none', step: 'end', lineStyle: { color: '#6f95ff', width: 1 }, color: '#6f95ff' },
     ] }, true);
 }
 function drawEmotionDay(D) {
@@ -355,14 +355,14 @@ window.openLadderModel = async () => {
       ${v.dab.map(x => `<tr><td class="l">${pct(x.p_lo, 0)} ~ ${pct(x.p_hi, 0)}</td><td>${x.n}</td><td>${pct(x.rate, 1)}</td><td>${x.trades}</td><td>${pct(x.dab)}</td><td>${pct(x.dab_win, 0)}</td></tr>`).join('')}</tbody></table>
       <div class="muted" style="font-size:12px;margin-top:4px">打板 = 次日盘中摸到涨停价就以涨停价买入（一字板买不到不算），第三天开盘卖出，含手续费和滑点；摸板后炸板的亏损也算在内。</div>
       <h4 style="margin-top:10px">权重（标准化后，正数 = 提高晋级概率）</h4>
-      <div>${(v.coef || []).slice(0, 14).map(c => `<span class="tag" style="${c.w >= 0 ? 'color:#d93026' : 'color:#13a05b'}">${c.label} ${c.w > 0 ? '+' : ''}${c.w.toFixed(2)}</span>`).join(' ')}</div></div></div></div>`;
+      <div>${(v.coef || []).slice(0, 14).map(c => `<span class="tag${c.w >= 0 ? '' : ' sell'}">${c.label} ${c.w > 0 ? '+' : ''}${c.w.toFixed(2)}</span>`).join(' ')}</div></div></div></div>`;
   }).join('') || '<div class="muted">还没有模型结果</div>';
   ['二板', '首板', '三板+'].forEach(k => {
     const el = document.getElementById('ld-cal-' + k), v = ev[k];
     if (!el || !v.calib) return;
-    echarts.init(el).setOption({ grid: { left: 40, right: 10, top: 10, bottom: 24 }, tooltip: { trigger: 'axis', valueFormatter: x => (x * 100).toFixed(1) + '%' },
+    echarts.init(el, THEME).setOption({ grid: { left: 40, right: 10, top: 10, bottom: 24 }, tooltip: { trigger: 'axis', valueFormatter: x => (x * 100).toFixed(1) + '%' },
       xAxis: { type: 'category', data: v.calib.map((_, i) => i + 1) }, yAxis: { type: 'value', max: 1, axisLabel: { formatter: x => x * 100 + '%' } },
-      series: [{ name: '实际晋级率', type: 'bar', data: v.calib.map(c => c.rate), color: '#d93026' }, { name: '平均预测概率', type: 'line', data: v.calib.map(c => c.p), color: '#2f5bea' }] });
+      series: [{ name: '实际晋级率', type: 'bar', data: v.calib.map(c => c.rate), color: UP }, { name: '平均预测概率', type: 'line', data: v.calib.map(c => c.p), color: '#6f95ff' }] });
   });
 };
 $('#ld-model-btn').onclick = () => openLadderModel();
@@ -524,12 +524,12 @@ $('#va-run').onclick = async () => {
       <div class="section"><h4>历史选股明细（最近 ${d.picks.length} 条，点击查看当时的缠论图）</h4><div class="tablewrap" style="max-height:420px">
       <table class="grid" id="va-picks"><thead><tr>${pickHead}</tr></thead>
       <tbody>${d.picks.map(p => `<tr data-code="${p.code}" data-date="${p.date}" data-name="${esc(p.name)}">${pickRow(p)}</tr>`).join('')}</tbody></table></div></div>`;
-    const m = echarts.init($('#va-month'));
+    const m = echarts.init($('#va-month'), THEME);
     m.setOption({ tooltip: { trigger: 'axis', valueFormatter: v => v == null ? '-' : (v * 100).toFixed(2) + '%' }, legend: { top: 0 },
       grid: { left: 50, right: 20, top: 30, bottom: 30 }, xAxis: { type: 'category', data: d.by_month.map(x => x.key) },
       yAxis: { type: 'value', axisLabel: { formatter: v => (v * 100).toFixed(0) + '%' } },
       series: [{ name: `选股${hm}日平均`, type: 'bar', color: UP, data: d.by_month.map(x => ({ value: x['avg' + hm], itemStyle: { color: x['avg' + hm] >= 0 ? UP : DOWN } })) },
-               { name: '沪深300 同期', type: 'line', color: '#2f5bea', data: d.by_month.map(x => x['bench' + hm]), symbol: 'none', lineStyle: { color: '#2f5bea' } }] });
+               { name: '沪深300 同期', type: 'line', color: '#6f95ff', data: d.by_month.map(x => x['bench' + hm]), symbol: 'none', lineStyle: { color: '#6f95ff' } }] });
     $('#va-picks').onclick = e => { const tr = e.target.closest('tr[data-code]'); if (tr) openModal(tr.dataset.code, tr.dataset.date, tr.dataset.name); };
   } catch (e) { $('#va-result').innerHTML = `<div class="down">${e.message}</div>`; }
 };
@@ -586,7 +586,7 @@ $('#bt-run').onclick = async () => {
       <thead><tr><th class="l">代码</th><th class="l">名称</th><th class="l">模式/买点</th><th class="l">题材</th><th>评分</th><th>买入日</th><th>买入价</th><th>卖出日</th><th>卖出价</th><th>持有</th><th class="l">原因</th><th>收益</th></tr></thead>
       <tbody>${d.trades.map(t => `<tr data-code="${t.code}" data-date="${t.buy_date}" data-name="${esc(t.name)}"><td class="l mono">${t.code}</td><td class="l">${esc(t.name)}</td><td class="l">${t.mode === '缠论' ? typesCN(t.types) : t.mode}</td><td class="l">${esc(t.theme || '')}</td><td>${num(t.score, 0)}</td>
       <td>${t.buy_date}</td><td>${num(t.buy_price)}</td><td>${t.sell_date}</td><td>${num(t.sell_price)}</td><td>${t.days}</td><td class="l">${t.reason}</td><td>${pct(t.ret)}</td></tr>`).join('')}</tbody></table></div></div>`;
-    const ch = echarts.init($('#bt-curve'));
+    const ch = echarts.init($('#bt-curve'), THEME);
     const cv = d.curve;
     ch.setOption({ animation: false, tooltip: { trigger: 'axis' }, legend: { top: 0 },
       axisPointer: { link: [{ xAxisIndex: 'all' }] },
@@ -597,7 +597,7 @@ $('#bt-run').onclick = async () => {
       dataZoom: [{ type: 'inside', xAxisIndex: [0, 1] }, { type: 'slider', xAxisIndex: [0, 1], height: 14, bottom: 0 }],
       series: [{ name: '策略净值', type: 'line', color: UP, data: cv.equity, symbol: 'none', lineStyle: { color: UP, width: 1.6 },
                  markArea: { silent: true, data: phaseBands(cv.dates, cv.phase || []) } },
-               { name: '沪深300', type: 'line', color: '#2f5bea', data: cv.bench, symbol: 'none', lineStyle: { color: '#2f5bea', width: 1.2 } },
+               { name: '沪深300', type: 'line', color: '#6f95ff', data: cv.bench, symbol: 'none', lineStyle: { color: '#6f95ff', width: 1.2 } },
                { name: '回撤', type: 'line', color: DOWN, xAxisIndex: 1, yAxisIndex: 1, data: cv.drawdown, symbol: 'none', areaStyle: { color: 'rgba(19,160,91,.25)' }, lineStyle: { width: 0 } }] });
     $('#bt-trades').onclick = e => { const tr = e.target.closest('tr[data-code]'); if (tr) openModal(tr.dataset.code, prevDay(tr.dataset.date), tr.dataset.name); };
   } catch (e) { $('#bt-result').innerHTML = `<div class="down">${e.message}</div>`; }
