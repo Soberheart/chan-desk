@@ -60,7 +60,7 @@ def main():
                 n += 1
             return f"{n} 根5分钟线"
         t("baostock 5分钟线", q5)
-        bs.logout()
+        t("baostock 退出", lambda: bs.logout() and "")
     except ImportError:
         log("baostock 没有安装")
     # ---- akshare
