@@ -65,11 +65,16 @@ def status():
         n_sig = c.execute("SELECT COUNT(*) FROM signals").fetchone()[0]
         rng = c.execute("SELECT MIN(detect_date), MAX(detect_date) FROM signals").fetchone()
     running = _job["proc"] is not None and _job["proc"].poll() is None
+    prog = _progress()
+    if prog and prog.get("running") and not running:
+        # 进度文件说“运行中”，但本次启动后并没有任务在跑：上次任务被关窗口或卡死了
+        prog.update(running=False, ok=False, stage="上次任务没有正常结束",
+                    msg="上次任务没有正常结束（窗口被关闭或网络卡住），请重新点击更新；已下载的部分不会重下")
     return ok({"stocks": n_stock, "signals": n_sig, "signal_range": rng, "latest_day": analytics.latest_day(),
                "market": db.get_meta("last_market_update"), "build": db.get_meta("last_signal_build"),
                "emotion": db.get_meta("last_emotion_build"), "themes": db.get_meta("themes_update"),
                "ladder": db.get_meta("last_ladder_build"),
-               "running": running, "progress": _progress(), "mock": MOCK})
+               "running": running, "progress": prog, "mock": MOCK})
 
 
 @app.post("/api/update")
