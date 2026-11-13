@@ -29,12 +29,12 @@ echo Using Python: %PY%
 %PY% -m venv .venv
 
 :deps
-if not exist ".venv\installed-v2.ok" (
+if not exist ".venv\installed-v3.ok" (
   echo ==== Installing packages (first run or after upgrade, 2-5 min) ====
   "%VPY%" -m pip install --upgrade pip
   "%VPY%" -m pip install -r requirements.txt
   if errorlevel 1 ( echo pip install failed. & pause & exit /b 1 )
-  echo ok> ".venv\installed-v2.ok"
+  echo ok> ".venv\installed-v3.ok"
 )
 
 echo ==== Chan Desk running at http://127.0.0.1:8765 ====

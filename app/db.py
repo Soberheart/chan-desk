@@ -54,10 +54,24 @@ CREATE TABLE IF NOT EXISTS emo_picks(
 CREATE TABLE IF NOT EXISTS zt_seal(
     code TEXT, date TEXT, first_seal TEXT, last_seal TEXT, open_times INTEGER, PRIMARY KEY(code, date)
 ) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS zt_reason(
+    code TEXT, date TEXT, reason TEXT, board_type TEXT, high_days TEXT, PRIMARY KEY(code, date)
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS ladder(
     date TEXT, code TEXT, kind TEXT, board INTEGER, theme TEXT, tags TEXT, prob REAL, why TEXT,
     nxt_zt INTEGER, nxt_pct REAL, dab_ret REAL, PRIMARY KEY(date, code)
 ) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS dk_holdings(
+    code TEXT PRIMARY KEY, cost REAL, buy_date TEXT, position REAL, role TEXT, stop REAL, peers TEXT, theme TEXT,
+    note TEXT, updated TEXT
+);
+CREATE TABLE IF NOT EXISTS dk_plan(
+    date TEXT PRIMARY KEY, phase TEXT, cap TEXT, add_signal TEXT, cut_signal TEXT, note TEXT, updated TEXT
+);
+CREATE TABLE IF NOT EXISTS dk_journal(
+    id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, code TEXT, action TEXT, price REAL, position REAL,
+    reason TEXT, phase TEXT, temp REAL, verdict TEXT, created TEXT
+);
 CREATE TABLE IF NOT EXISTS sig_emo(
     code TEXT, date TEXT, phase TEXT, theme TEXT, theme_old INTEGER, theme_new INTEGER,
     hyped INTEGER, maxb5 INTEGER, PRIMARY KEY(code, date)
@@ -65,7 +79,7 @@ CREATE TABLE IF NOT EXISTS sig_emo(
 """
 
 # 旧库升级：kline_d 新增逐日涨跌幅与 ST 标记（空值的股票会在下次更新时整只重新下载）
-MIGRATIONS = {"kline_d": [("pct_chg", "REAL"), ("is_st", "INTEGER")]}
+MIGRATIONS = {"kline_d": [("pct_chg", "REAL"), ("is_st", "INTEGER")], "stocks": [("float_sh", "REAL")]}
 
 
 def connect():

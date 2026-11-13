@@ -186,3 +186,25 @@ h4{margin:4px 0 6px}
 
 .phase-banner .ph{filter:brightness(1.1)}
 .ptag{color:#0f141c;font-weight:600}
+
+/* 决策台 */
+.dk-top{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.6fr);gap:12px}
+@media (max-width:1100px){.dk-top{grid-template-columns:minmax(0,1fr)}}
+.dk-sub{font-weight:400;font-size:12px;margin-left:6px}
+.dk-big{font-size:22px;font-weight:700;margin-right:10px}
+.dk-b{display:inline-block;padding:1px 9px;border-radius:10px;font-size:12.5px;font-weight:600;white-space:nowrap}
+.dk-b.go{background:rgba(38,179,110,.16);color:#5fe0a3}
+.dk-b.mid{background:rgba(224,160,48,.16);color:#f2b65a}
+.dk-b.stop{background:rgba(240,82,74,.16);color:#ff8a80}
+.dk-b.cold{background:#232b38;color:#8b95a5}
+.dk-b.info{background:var(--chip-on);color:#9db8ff}
+.dk-adv{margin:8px 0;padding:8px 10px;background:var(--panel2);border-left:3px solid var(--accent);border-radius:4px}
+.dk-sig td{font-size:12.5px}
+.dk-form{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px}
+.dk-form input,.dk-form select{width:auto}
+.dk-plan{display:grid;grid-template-columns:110px minmax(0,1fr);gap:6px 10px;align-items:center}
+.dk-plan input{width:100%}
+.dk-rules ul{margin:6px 0 10px 18px;padding:0;line-height:1.8}
+.dk-rules h5{margin:10px 0 2px}
+.dk-why{font-size:12.5px;line-height:1.6}
+.dk-row-open td{background:rgba(38,179,110,.05)}

@@ -438,9 +438,13 @@ def day(date=None, kind="zt"):
                                   "GROUP BY board", (prev_d,)):
                 prev_cnt[b] += n
         emo = c.execute("SELECT phase, temp FROM emo_daily WHERE date=?", (date,)).fetchone()
+        reasons = {a: (b, bt, hd) for a, b, bt, hd in c.execute(
+            "SELECT code, reason, board_type, high_days FROM zt_reason WHERE date=?", (date,))}
     out = []
     for code, b, th, tags, prob, why, ny, np_, dab in rows:
+        rs = reasons.get(code)
         out.append({"code": code, "name": names.get(code, ""), "board": b, "theme": th, "tags": json.loads(tags),
+                    "reason": rs[0] if rs else None, "ths_type": rs[1] if rs else None,
                     "prob": prob, "why": json.loads(why) if why else [], "nxt_zt": ny, "nxt_pct": np_, "dab": dab})
     fails = [{"code": code, "name": names.get(code, ""), "board": b + 1, "from": b, "theme": th,
               "tags": json.loads(tags), "prob": prob, "pct": np_} for code, b, th, tags, prob, np_ in failed]
