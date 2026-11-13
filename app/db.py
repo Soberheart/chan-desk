@@ -54,6 +54,9 @@ CREATE TABLE IF NOT EXISTS emo_picks(
 CREATE TABLE IF NOT EXISTS zt_seal(
     code TEXT, date TEXT, first_seal TEXT, last_seal TEXT, open_times INTEGER, PRIMARY KEY(code, date)
 ) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS zt_reason(
+    code TEXT, date TEXT, reason TEXT, board_type TEXT, high_days TEXT, PRIMARY KEY(code, date)
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS ladder(
     date TEXT, code TEXT, kind TEXT, board INTEGER, theme TEXT, tags TEXT, prob REAL, why TEXT,
     nxt_zt INTEGER, nxt_pct REAL, dab_ret REAL, PRIMARY KEY(date, code)
@@ -76,7 +79,7 @@ CREATE TABLE IF NOT EXISTS sig_emo(
 """
 
 # 旧库升级：kline_d 新增逐日涨跌幅与 ST 标记（空值的股票会在下次更新时整只重新下载）
-MIGRATIONS = {"kline_d": [("pct_chg", "REAL"), ("is_st", "INTEGER")]}
+MIGRATIONS = {"kline_d": [("pct_chg", "REAL"), ("is_st", "INTEGER")], "stocks": [("float_sh", "REAL")]}
 
 
 def connect():

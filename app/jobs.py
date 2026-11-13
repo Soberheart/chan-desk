@@ -4,7 +4,7 @@
        python -m app.jobs signals       （只重算缠论信号和情绪周期）
        python -m app.jobs emotion       （只重算情绪周期）
        python -m app.jobs themes        （强制重新下载题材成分，再重算情绪周期）
-       python -m app.jobs seals         （补全历史二板及以上的分时封板数据，再重算连板天梯）
+       python -m app.jobs seals         （补全分时封板数据，再重算连板天梯；腾讯/同花顺来源只有最近一两个月）
 """
 import datetime as dt
 import json

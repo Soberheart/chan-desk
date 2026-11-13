@@ -1,9 +1,9 @@
 """题材（概念）成分股。
 
-来源优先级：东方财富概念板块（akshare）→ baostock 证监会行业（兜底）；另外可以在
+来源：新浪热门概念（默认）、东方财富概念板块（akshare）、baostock 证监会行业，失败时依次退回；另外可以在
 data/themes_custom.csv 里自己补充题材（两列：code,theme，code 写 600519 或 sh.600519 都行）。
 
-注意：东财概念只能拿到“当前”的成分股，没有历史成分。用它回看过去的题材，会把后来才被
+注意：概念板块只能拿到“当前”的成分股，没有历史成分。用它回看过去的题材，会把后来才被
 归入某概念的股票也算进去（前视偏差），新概念（例如今年才有的）在历史上会显得“从未被炒作过”。
 历史验证和回测里情绪模式的结果要打个折扣看。
 """
@@ -62,6 +62,31 @@ def fetch_akshare(progress):
     return rows
 
 
+def fetch_sina(progress):
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    from . import sources as S
+    nodes = [(n, t) for n, t in S.sina_concepts() if not blacklisted(t)]
+    progress("stage", f"下载新浪概念成分股（{len(nodes)} 个概念）")
+    rows, fails, done = [], 0, 0
+    with ThreadPoolExecutor(6) as ex:
+        futs = {ex.submit(S.sina_concept_members, n, THEME_MAX_MEMBERS): t for n, t in nodes}
+        for f in as_completed(futs):
+            done += 1
+            try:
+                mem = f.result()
+            except Exception:  # noqa
+                fails += 1
+                mem = None
+            if mem:
+                rows += [(c, futs[f], "新浪概念") for c in mem]
+            if done % 20 == 0 or done == len(nodes):
+                progress("themes", done=done, total=len(nodes))
+    if fails > len(nodes) * 0.3:
+        raise RuntimeError(f"新浪概念有 {fails}/{len(nodes)} 个下载失败")
+    return rows
+
+
 def fetch_industry(progress):
     from .datafeed import _BS, _rs_to_df
     progress("stage", "下载 baostock 证监会行业分类")
@@ -104,7 +129,14 @@ def update_themes(progress=lambda *a, **k: None, force=False):
         rows, source = fetch_mock(progress), "模拟题材"
     else:
         rows = []
-        if want == "akshare":
+        if want == "sina":
+            try:
+                rows, source = fetch_sina(progress), "新浪概念"
+            except Exception as e:  # noqa
+                note = f"新浪概念下载失败（{e}）"
+                progress("stage", note)
+        if not rows and want in ("akshare", "sina"):
+            note = ""
             try:
                 rows, source = fetch_akshare(progress), "东财概念"
             except ImportError:
@@ -114,7 +146,10 @@ def update_themes(progress=lambda *a, **k: None, force=False):
             if note:
                 progress("stage", note)
         if not rows:
-            rows, source = fetch_industry(progress), "证监会行业"
+            try:
+                rows, source = fetch_industry(progress), "证监会行业"
+            except Exception as e:  # noqa
+                raise RuntimeError(f"题材下载全部失败，保留原来的题材库（{e}）") from e
     rows += load_custom()
     with db.session() as c:
         c.execute("DELETE FROM themes")

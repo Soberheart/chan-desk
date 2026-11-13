@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 
 from . import db
-from .settings import BENCHMARK, DATA_START, DOWNLOAD_WORKERS, MARKET_INDEXES, MOCK
+from .settings import BENCHMARK, DATA_SOURCE, DATA_START, DOWNLOAD_WORKERS, MARKET_INDEXES, MOCK
 
 BOARD_PREFIX = ("sh.60", "sh.68", "sz.00", "sz.30")
 DAY_FIELDS = "date,open,high,low,close,volume,amount,turn,tradestatus,isST,pctChg"
@@ -232,9 +232,53 @@ def mock_30m(code, start, end):
     return pd.DataFrame(rows, columns=["time", "open", "high", "low", "close", "volume"])
 
 
-stock_list = mock_stock_list if MOCK else bs_stock_list
-fetch_daily = mock_daily if MOCK else bs_daily
-fetch_30m = mock_30m if MOCK else bs_30m
+def stock_list():
+    if MOCK:
+        return mock_stock_list()
+    return bs_stock_list() if DATA_SOURCE == "baostock" else tc_stock_list()
+# ---------------------------------------------------------------- 腾讯 + 新浪（默认来源）
+def tc_stock_list():
+    from . import sources as S
+    return [(code, name, None) for code, name in S.sina_stock_list() if code[:5] in BOARD_PREFIX]
+
+
+def tc_daily(code, start, end, index=False):
+    """不复权日线 + 新浪等比前复权因子 → 和 bs_daily 同样格式的 DataFrame（前复权，最新一天 = 不复权价）。"""
+    from . import sources as S
+    pre = (dt.date.fromisoformat(start) - dt.timedelta(days=15)).isoformat()   # 多取几天，用来算第一根的涨跌幅
+    rows, name = S.tc_daily_raw(code, pre, end)
+    cols = ["date", "open", "high", "low", "close", "volume", "amount", "turn", "pctChg", "tradestatus", "isST"]
+    if not rows:
+        return pd.DataFrame(columns=cols)
+    facs = [] if index else S.sina_factors(code)
+    last_f = facs[-1][1] if facs else 1.0
+    out, prev_c = [], None
+    for r in rows:
+        k = (S.factor_on(facs, r["date"]) / last_f) if facs else 1.0
+        o, h, lo, c = (r[x] / k for x in ("open", "high", "low", "close"))
+        out.append((r["date"], o, h, lo, c, r["volume"], r["amount"], r["turn"],
+                    (c / prev_c - 1) * 100 if prev_c else None, "1",
+                    "1" if name and "ST" in name.upper() else "0"))
+        prev_c = c
+    df = pd.DataFrame(out, columns=cols)
+    return df[df["date"] >= start].reset_index(drop=True)
+
+
+def tc_30m(code, start, end):
+    """腾讯只给最近 320 根 30 分钟线（约 40 个交易日）。"""
+    from . import sources as S
+    rows = S.tc_minutes(code, "m30")
+    df = pd.DataFrame([(f"{d} {t}", o, h, lo, c, v) for d, t, o, h, lo, c, v in rows],
+                      columns=["time", "open", "high", "low", "close", "volume"])
+    return df[(df["time"].str[:10] >= start) & (df["time"].str[:10] <= end)]
+
+
+if MOCK:
+    fetch_daily, fetch_30m = mock_daily, mock_30m
+elif DATA_SOURCE == "baostock":
+    fetch_daily, fetch_30m = bs_daily, bs_30m
+else:
+    fetch_daily, fetch_30m = tc_daily, tc_30m
 
 
 # ---------------------------------------------------------------- update
@@ -272,14 +316,30 @@ def _save_daily(conn, code, df, full):
         [(code, r.date, r.open, r.high, r.low, r.close, r.volume, r.amount, r.turn,
           None if pd.isna(pc) else float(pc), int(si)) for r, pc, si in zip(df.itertuples(), pct, st)],
     )
-    row = conn.execute("SELECT MAX(date), COUNT(*) FROM kline_d WHERE code=?", (code,)).fetchone()
+    row = conn.execute("SELECT MAX(date), COUNT(*), MIN(date) FROM kline_d WHERE code=?", (code,)).fetchone()
     conn.execute("UPDATE stocks SET last_date=?, bars=? WHERE code=?", (row[0], row[1], code))
+    if full and row[2] and row[2] > (dt.date.fromisoformat(DATA_START) + dt.timedelta(days=10)).isoformat():
+        conn.execute("UPDATE stocks SET ipo_date=? WHERE code=? AND (ipo_date IS NULL OR ipo_date='')", (row[2], code))
+    # 流通股本 ≈ 成交量 / 换手率，供盘后包增量更新时推算换手率
+    if "turn" in df:
+        t = pd.to_numeric(df["turn"], errors="coerce").tail(20)
+        v = pd.to_numeric(df["volume"], errors="coerce").tail(20)
+        fs = (v / (t / 100)).where(t > 0).dropna()
+        if len(fs):
+            conn.execute("UPDATE stocks SET float_sh=? WHERE code=?", (float(fs.median()), code))
+
+
+def last_closed_day():
+    """北京时间 15:30 以前，今天的K线还没走完，只更新到昨天。"""
+    now = dt.datetime.utcnow() + dt.timedelta(hours=8)
+    d = now.date() if now.time() >= dt.time(15, 30) else now.date() - dt.timedelta(days=1)
+    return d.isoformat()
 
 
 def update_market(progress=lambda *a, **k: None, end=None):
     """下载/增量更新全部 A 股日线、基准指数和交易日历。"""
     db.init_db()
-    end = end or today()
+    end = end or (today() if MOCK else last_closed_day())
     progress("stage", "获取股票列表")
     lst = stock_list()
     with db.session() as c:
@@ -311,6 +371,8 @@ def update_market(progress=lambda *a, **k: None, end=None):
     latest_day = idx["date"].max() if not idx.empty else end
 
     codes = [code for code, _, _ in lst]
+    if not MOCK and DATA_SOURCE != "baostock":
+        known = _tdx_fast_path(known, {c: n for c, n, _ in lst}, latest_day, progress)
     tasks = [(code, known.get(code, (None, None))[0], known.get(code, (None, None))[1], end)
              for code in codes if known.get(code, (None,))[0] != latest_day]
     progress("stage", f"下载日线（{len(tasks)} 只需要更新）")
@@ -349,6 +411,57 @@ def update_market(progress=lambda *a, **k: None, end=None):
     db.set_meta("last_market_update", {"time": dt.datetime.now().strftime("%Y-%m-%d %H:%M"),
                                        "latest_day": latest_day, "errors": errors[:50]})
     return latest_day, errors
+
+
+def _tdx_fast_path(known, names, latest_day, progress):
+    """日常增量：用通达信盘后包一次补齐全市场缺的几天，避免逐只请求腾讯。
+    盘后包里的昨收已经按除权调整过：昨收和库里最后收盘价对不上 = 发生除权，这只交给腾讯整只重下。"""
+    from . import sources as S
+    have = [v[0] for v in known.values() if v[0]]
+    if not have:
+        return known
+    days = db.trade_days()
+    last_common = max(set(have), key=have.count)       # 大多数股票停在的那一天
+    todo = [d for d in days if last_common < d <= latest_day]
+    if not todo or len(todo) > 10:
+        return known
+    known = dict(known)
+    with db.session() as c:
+        fsh = {a: b for a, b in c.execute("SELECT code, float_sh FROM stocks")}
+    added = 0
+    for d in todo:
+        progress("stage", f"下载通达信盘后包 {d}")
+        try:
+            pkg = S.tdx_package(d)
+        except Exception as e:  # noqa
+            progress("stage", f"盘后包 {d} 下载失败（{e}），改为逐只下载")
+            break
+        if pkg is None:
+            progress("stage", f"{d} 的盘后包还没发布（通常收盘后几小时），改为逐只下载")
+            break
+        prev = days[days.index(d) - 1]
+        rows, exdiv = [], 0
+        for code, (ld, lc) in list(known.items()):
+            r = pkg.get(code)
+            if ld != prev or lc is None or r is None:
+                continue
+            if abs(r["prev_close"] - lc) > max(0.011, lc * 2e-4):
+                known[code] = (None, None)      # 除权：整只重下
+                exdiv += 1
+                continue
+            name = names.get(code, r["name"])
+            turn = r["volume"] / fsh[code] * 100 if fsh.get(code) else None
+            rows.append((code, d, r["open"], r["high"], r["low"], r["close"], r["volume"], r["amount"], turn,
+                         r["close"] / r["prev_close"] - 1 if r["prev_close"] else None,
+                         int("ST" in (name or "").upper())))
+            known[code] = (d, r["close"])
+        with db.session() as c:
+            c.executemany("INSERT OR REPLACE INTO kline_d(code,date,open,high,low,close,volume,amount,turn,pct_chg,"
+                          "is_st) VALUES(?,?,?,?,?,?,?,?,?,?,?)", rows)
+            c.executemany("UPDATE stocks SET last_date=?, bars=bars+1 WHERE code=?", [(d, r[0]) for r in rows])
+        added += len(rows)
+        progress("stage", f"盘后包 {d}：更新 {len(rows)} 只，除权 {exdiv} 只待重下")
+    return known
 
 
 def ensure_30m(code, start, end):
@@ -442,6 +555,46 @@ def _seal_one(args):
         return code, day, None, str(e)
 
 
+def _seals_cn(tasks, progress, save, conn):
+    """同花顺涨停揭秘（按天一次拿全市场，含涨停原因）为主，腾讯 5 分钟线（最近约 6 个交易日）补缺。"""
+    from . import sources as S
+    by_day = {}
+    for code, day in tasks:
+        by_day.setdefault(day, []).append(code)
+    recent = (dt.date.today() - dt.timedelta(days=45)).isoformat()
+    m5_from = db.trade_days()[-6:][0] if db.trade_days() else today()
+    m5_cache, done = {}, 0
+    for day in sorted(by_day):
+        ths = {}
+        if day >= recent:
+            try:
+                for it in S.ths_limit_up(day):
+                    ths[it["code"]] = it
+                conn.executemany("INSERT OR REPLACE INTO zt_reason VALUES(?,?,?,?,?)",
+                                 [(it["code"], day, it["reason"], it["board_type"], it["high_days"])
+                                  for it in ths.values()])
+            except Exception as e:  # noqa
+                progress("stage", f"同花顺涨停池 {day} 获取失败：{e}")
+        for code in by_day[day]:
+            it = ths.get(code)
+            if it and it["first_time"]:
+                first = "09:25" if it["first_time"] <= "09:30" else it["first_time"]
+                save(code, day, (first, it["last_time"] or first, it["open_num"]), None)
+            elif day >= m5_from:
+                try:
+                    if code not in m5_cache:
+                        m5_cache[code] = S.tc_minutes(code, "m5")
+                    bars = [(t, o, h, lo, c) for d, t, o, h, lo, c, _ in m5_cache[code] if d == day]
+                    save(code, day, seal_stats(bars), None)
+                except Exception as e:  # noqa
+                    save(code, day, None, str(e))
+            else:
+                save(code, day, None, "太早，没有分时数据")
+            done += 1
+        conn.commit()
+        progress("seal", done=done, total=len(tasks))
+
+
 def update_seals(pairs, progress=lambda *a, **k: None):
     """下载 (code, date) 对的分时封板数据，已有的跳过。返回 (成功数, 失败数)。"""
     db.init_db()
@@ -466,7 +619,9 @@ def update_seals(pairs, progress=lambda *a, **k: None):
 
     try:
         workers = 1 if MOCK else DOWNLOAD_WORKERS
-        if workers == 1:
+        if not MOCK and DATA_SOURCE != "baostock":
+            _seals_cn(tasks, progress, save, conn)
+        elif workers == 1:
             for t in tasks:
                 save(*_seal_one(t))
                 done += 1

@@ -5,7 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 CHAN_DIR = ROOT / "chan"
-DATA_DIR = ROOT / "data"
+DATA_DIR = Path(os.environ["CHAN_DESK_DATA"]) if os.environ.get("CHAN_DESK_DATA") else ROOT / "data"
 WEB_DIR = ROOT / "web"
 DB_PATH = DATA_DIR / "market.db"
 PROGRESS_PATH = DATA_DIR / "job_progress.json"
@@ -59,10 +59,12 @@ STAMP_TAX = 0.0005     # 印花税（卖出）
 SLIPPAGE = 0.001       # 滑点（双边）
 
 # ---------------------------------------------------------------- 情绪周期（92科比）
-# 题材来源：akshare = 东方财富概念板块（失败时自动退回 baostock 证监会行业）；industry = 只用行业
-THEME_SOURCE = os.environ.get("CHAN_DESK_THEME", "akshare")
+# 行情来源：tencent = 腾讯K线 + 新浪复权因子 + 通达信盘后包（默认，海外网络也能用）；baostock = 原来的 baostock
+DATA_SOURCE = os.environ.get("CHAN_DESK_SOURCE", "tencent")
+# 题材来源：sina = 新浪热门概念（默认）；akshare = 东方财富概念板块；industry = baostock 证监会行业
+THEME_SOURCE = os.environ.get("CHAN_DESK_THEME", "sina" if DATA_SOURCE == "tencent" else "akshare")
 THEME_REFRESH_DAYS = 7           # 题材成分每隔几天重新下载一次
-THEME_MAX_MEMBERS = 300          # 成分股太多的“概念”过于宽泛（如融资融券），不当作题材
+THEME_MAX_MEMBERS = 600          # 成分股太多的“概念”过于宽泛，不当作题材（人形机器人在新浪有 500 多只）
 CUSTOM_THEME_CSV = DATA_DIR / "themes_custom.csv"   # 可选：自己维护的题材，两列 code,theme
 # 名称里含这些字的东财概念不是“题材”，而是指数、资金、持股或财务标签
 THEME_BLACKLIST = (
@@ -71,6 +73,9 @@ THEME_BLACKLIST = (
     "茅指数", "宁组合", "破净", "低价股", "百元股", "AH股", "B股", "GDR", "送转", "股权激励", "股权转让",
     "举牌", "ST股", "专精特新", "微盘股", "QFII", "社保", "养老金", "基金", "红利", "长期破净", "贬值受益",
     "AB股", "参股", "富时", "北交所", "注册制次新股", "IPO受益", "增持", "回购",
+    # 新浪“热门概念”里按市值、价格、估值、走势分的标签，也不是题材
+    "大盘", "中盘", "小盘", "低价", "次新", "高派息", "低市盈率", "价值成长", "价值品牌", "年度强势", "历史新高",
+    "龙虎榜", "陆股通", "ST板块", "深ST板", "沪警示板", "退市警示", "摘帽", "证金汇金", "H股",
 )
 
 PHASES = ("低位试错", "主升", "高位震荡", "主跌")

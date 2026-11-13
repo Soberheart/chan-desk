@@ -529,6 +529,7 @@ $('#page-ladder').addEventListener('mousemove', e => {
   if (!r) { tip.style.display = 'none'; return; }
   tip.innerHTML = `<div class="hd">${esc(r.name)} ${r.code} · 晋级概率 ${probTxt(r.prob)}</div>
     ${r.why && r.why.length ? `<table>${r.why.map(([k, v, c]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td><td class="${c >= 0 ? 'pos' : 'neg'}">${c >= 0 ? '▲ 加分' : '▼ 减分'}</td></tr>`).join('')}</table>` : '<div class="muted">没有模型结果（历史样本不足）</div>'}
+    ${r.reason ? `<div style="margin-top:4px">同花顺涨停原因：${esc(r.reason)}${r.ths_type ? '（' + esc(r.ths_type) + '）' : ''}</div>` : ''}
     <div style="color:#6b7585;margin-top:4px">${r.tags && r.tags.last ? `最后回封 ${r.tags.last} · ` : ''}点击看缠论结构</div>`;
   tip.style.display = 'block';
   const x = Math.min(e.clientX + 14, window.innerWidth - 360), y = Math.min(e.clientY + 14, window.innerHeight - tip.offsetHeight - 10);
