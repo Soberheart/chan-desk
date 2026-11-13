@@ -245,6 +245,145 @@ $('#em-run').onclick = () => runEmotion();
 $('#em-range').onchange = () => runEmotion();
 pages.emotion = { show() { if (!EM) runEmotion(); else emChart && emChart.resize(); } };
 
+// ------------------------------------------------------------ 决策台
+const DK = { data: null };
+const dkCls = v => ({ '可以开仓': 'go', '龙头期': 'go', '龙头期·弱转强': 'go', '弱转强': 'go', '一致': 'go', '持有': 'go',
+  '轻仓': 'mid', '龙头期·分歧': 'mid', '分歧': 'mid', '补涨期': 'mid', '震荡': 'mid', '警告': 'mid', '减半': 'mid', '提示': 'info', '冰点': 'info',
+  '不宜开仓': 'stop', '滞涨退潮': 'stop', '退潮': 'stop', '不开仓': 'stop', '清仓': 'stop', '空仓等待': 'cold' })[v] || 'info';
+const dkB = v => `<span class="dk-b ${dkCls(v)}">${esc(v || '-')}</span>`;
+const sideB = s => `<span class="dk-b ${s === '退潮' ? 'stop' : s === '补涨' ? 'mid' : s === '中性' ? 'cold' : 'go'}">${s}</span>`;
+async function runDecision() {
+  $('#dk-msg').textContent = '加载中…';
+  try {
+    const d = await api('/api/decision?' + new URLSearchParams({ date: $('#dk-date').value || '', themes: $('#dk-themes').value.replace(/，/g, ',') }));
+    DK.data = d; $('#dk-msg').textContent = '';
+    if (d.market) $('#dk-date').value = d.market.date;
+    drawDecision();
+    loadJournal();
+  } catch (e) { $('#dk-msg').textContent = e.message; }
+}
+function drawDecision() {
+  const d = DK.data, m = d.market, ix = d.index;
+  // 指数
+  $('#dk-index').innerHTML = `<h4>① 指数：能不能开仓</h4>
+    <div><span class="dk-big">${dkB(ix.verdict || '无指数数据')}</span><span class="muted">主看${ix.rows[0] ? ix.rows[0].name : '-'}；站上20日线且20日线向上才放开仓位</span></div>
+    <table class="grid dk-sig" style="margin-top:8px"><tbody>${ix.rows.map(r => `<tr><td class="l">${r.name}</td><td>${num(r.close, 2)}</td><td>${pct(r.pct)}</td><td class="l">${dkB(r.verdict)}</td><td class="l muted">${esc(r.why)}</td></tr>`).join('') || '<tr><td class="l muted">还没有指数数据，更新一次行情即可</td></tr>'}</tbody></table>`;
+  // 情绪
+  $('#dk-market').innerHTML = `<h4>② 市场情绪：分歧还是退潮</h4>
+    <div>${phaseTag(m.phase)} <span class="muted">水温</span> <b>${num(m.temp, 0)}</b> <span class="muted">· 阶段仓位上限</span> <b>${Math.round(m.cap * 100)}%</b> <span class="muted">· 今天</span> ${dkB(m.verdict)}
+      ${m.down_days >= 2 ? `<span class="muted">· 已连跌 ${m.down_days} 天</span>` : ''}</div>
+    <div class="dk-adv">${esc(m.advice)}</div>
+    <table class="grid dk-sig"><thead><tr><th class="l">看什么</th><th class="l">今天</th><th class="l">指向</th><th class="l">说明</th></tr></thead><tbody>
+    ${m.signals.map(x => `<tr><td class="l">${x.name}</td><td class="l">${esc(x.value)}</td><td class="l">${sideB(x.side)}</td><td class="l muted">${x.why}</td></tr>`).join('')}</tbody></table>`;
+  // 题材
+  const T = d.themes;
+  $('#dk-theme').innerHTML = `<table class="grid"><thead><tr><th class="l">题材</th><th class="l">周期阶段</th><th class="l">能否开仓</th><th class="l">龙头</th><th>今日/5日涨停</th><th>板块涨跌</th><th class="l">买点</th><th class="l">卖点</th></tr></thead><tbody>
+    ${T.rows.map((t, i) => `<tr class="${t.open !== '不开仓' ? 'dk-row-open' : ''}"><td class="l"><b>${esc(t.theme)}</b>${t.held ? ' <span class="tag">持仓</span>' : ''}<br><a class="muted" href="javascript:void(0)" onclick="document.getElementById('dk-tsig-${i}').toggleAttribute('hidden')" style="font-size:12px">依据 ▾</a></td>
+      <td class="l">${dkB(t.stage)}</td><td class="l">${dkB(t.open)}${t.gate.length ? `<div class="muted" style="font-size:12px">${t.gate.join('，')}</div>` : ''}</td>
+      <td class="l">${esc(t.leader_name || '-')}${t.lead_max ? ` <span class="muted">近期最高 ${t.lead_max} 板</span>` : ''}</td>
+      <td>${t.zt} / ${t.zt5}</td><td>${pct(t.avg)}</td><td class="l dk-why">${esc(t.buy)}</td><td class="l dk-why">${esc(t.sell)}</td></tr>
+      <tr id="dk-tsig-${i}" hidden><td colspan="8" class="l"><table class="grid dk-sig"><tbody>${t.signals.map(x => `<tr><td class="l">${x.name}</td><td class="l">${esc(x.value)}</td><td class="l">${sideB(x.side)}</td></tr>`).join('')}</tbody></table></td></tr>`).join('')
+      || '<tr><td colspan="8" class="l muted">没有题材数据</td></tr>'}</tbody></table>
+    <div style="margin-top:6px" class="muted">今天出现的新题材（和老题材逻辑不同，可能是下一个主升）：${T.new.length ? T.new.map(x => `<span class="tag">${esc(x.theme)} ${x.zt}只${x.leader ? ' · ' + esc(x.leader) : ''}</span>`).join(' ') : '无'}</div>`;
+  // 计划
+  const pl = d.plan || {}, sg = d.suggest || {};
+  const v = k => esc(pl[k] ?? sg[k] ?? '');
+  $('#dk-plan').innerHTML = `<div class="dk-plan">
+    <span>阶段</span><input id="dk-p-phase" value="${v('phase')}">
+    <span>仓位上限</span><input id="dk-p-cap" value="${v('cap')}">
+    <span>加仓信号</span><input id="dk-p-add" value="${v('add_signal')}">
+    <span>减仓/离场信号</span><input id="dk-p-cut" value="${v('cut_signal')}">
+    <span>备注</span><input id="dk-p-note" value="${v('note')}" placeholder="今天要盯的票、要避开的坑"></div>
+    <div class="dk-form"><button class="primary" id="dk-p-save">保存今天的计划</button><span class="muted">${pl.updated ? '已保存于 ' + pl.updated : '还没保存，上面是根据今天的数据自动给的建议，改成你自己的再保存'}</span></div>`;
+  $('#dk-p-save').onclick = async () => {
+    await api('/api/decision/plan', { date: m.date, phase: $('#dk-p-phase').value, cap: $('#dk-p-cap').value,
+      add_signal: $('#dk-p-add').value, cut_signal: $('#dk-p-cut').value, note: $('#dk-p-note').value });
+    runDecision();
+  };
+  // 持仓
+  const H = d.holdings;
+  $('#dk-hold').innerHTML = `${H.portfolio.map(x => `<div class="dk-adv" style="border-color:var(--warn)">${esc(x)}</div>`).join('')}
+    <table class="grid"><thead><tr><th class="l">股票</th><th class="l">角色</th><th>仓位</th><th>成本</th><th>现价</th><th>盈亏</th><th>今日</th><th>板块</th><th class="l">结论</th><th class="l">触发的规则</th><th></th></tr></thead><tbody>
+    ${H.rows.map(h => `<tr><td class="l"><b>${esc(h.name)}</b> <span class="muted mono">${h.code.slice(3)}</span>${h.theme ? `<br><span class="muted" style="font-size:12px">${esc(h.theme)}</span>` : ''}</td>
+      <td class="l">${esc(h.role || '-')}</td><td>${h.position == null ? '-' : h.position + '%'}</td><td>${num(h.cost)}</td><td>${num(h.close)}</td><td>${pct(h.pnl, 1)}</td><td>${pct(h.pct)}</td><td>${pct(h.theme_avg)}</td>
+      <td class="l">${dkB(h.status)}</td><td class="l dk-why">${h.rules.length ? h.rules.map(r => `${dkB(r.sev)} <b>${esc(r.rule)}</b>：${esc(r.why)}`).join('<br>') : '<span class="muted">没有触发任何卖点</span>'}</td>
+      <td><button class="dk-del" data-code="${h.code}">删除</button></td></tr>`).join('') || '<tr><td colspan="11" class="l muted">还没有录入持仓。在下面添加，系统每天收盘后帮你逐条检查。</td></tr>'}</tbody></table>
+    <div class="dk-form">
+      <input id="dk-h-code" placeholder="代码或名称" style="width:110px"><input id="dk-h-cost" type="number" step="0.01" placeholder="成本价" style="width:80px">
+      <input id="dk-h-date" type="date" title="买入日期"><input id="dk-h-pos" type="number" placeholder="仓位%" style="width:70px">
+      <select id="dk-h-role">${d.roles.map(r => `<option>${r}</option>`).join('')}</select>
+      <input id="dk-h-stop" type="number" step="0.01" placeholder="止损价" style="width:80px">
+      <input id="dk-h-peers" placeholder="同批对照（如 福莱新材,宇树科技）" style="width:220px">
+      <input id="dk-h-theme" placeholder="题材（可空，自动识别）" style="width:150px">
+      <button class="primary" id="dk-h-add">添加/更新持仓</button><span id="dk-h-msg" class="muted"></span></div>`;
+  $('#dk-h-add').onclick = async () => {
+    try {
+      await api('/api/decision/holding', { code: $('#dk-h-code').value, cost: $('#dk-h-cost').value, buy_date: $('#dk-h-date').value,
+        position: $('#dk-h-pos').value, role: $('#dk-h-role').value, stop: $('#dk-h-stop').value, peers: $('#dk-h-peers').value, theme: $('#dk-h-theme').value });
+      runDecision();
+    } catch (e) { $('#dk-h-msg').textContent = e.message; }
+  };
+  document.querySelectorAll('#dk-hold .dk-del').forEach(b => b.onclick = async () => { await api('/api/decision/holding/delete', { code: b.dataset.code }); runDecision(); });
+  // 换强候选
+  const C = d.candidates;
+  $('#dk-cand').innerHTML = `<table class="grid"><thead><tr><th class="l">股票</th><th class="l">题材</th><th class="l">角色</th><th>今日</th><th>相对板块</th><th>距5日线</th><th>成交额</th><th class="l">买点</th><th class="l">单吊四条</th><th class="l">建议仓位</th></tr></thead><tbody>
+    ${C.map(x => `<tr data-code="${x.code}" data-name="${esc(x.name)}" style="cursor:pointer"><td class="l"><b>${esc(x.name)}</b> <span class="muted mono">${x.code.slice(3)}</span></td><td class="l">${esc(x.theme)}</td><td class="l">${x.role}${x.board ? ` <span class="muted">${x.board}板</span>` : ''}</td>
+      <td>${pct(x.pct, 1)}</td><td>${pct(x.rel, 1)}</td><td>${pct(x.dist, 1)}</td><td>${num(x.amount / 1e8, 0)}亿</td>
+      <td class="l">${x.point}${x.warn.map(w => ` <span class="tag warn">${w}</span>`).join('')}</td>
+      <td class="l" style="font-size:12px">${Object.entries(x.four).map(([k, ok]) => `<span class="${ok ? 'up' : 'muted'}">${ok ? '✓' : '✗'}${k}</span>`).join(' ')}</td><td class="l">${dkB(x.size === '可单吊' ? '可以开仓' : x.size === '观察' ? '空仓等待' : '轻仓').replace(/>[^<]+</, '>' + x.size + '<')}</td></tr>`).join('')
+      || '<tr><td colspan="10" class="l muted">没有候选</td></tr>'}</tbody></table>`;
+  document.querySelectorAll('#dk-cand tr[data-code]').forEach(tr => tr.onclick = () => openModal(tr.dataset.code, m.date, tr.dataset.name));
+}
+async function loadJournal() {
+  const j = await api('/api/decision/journal');
+  const acts = (DK.data && DK.data.actions) || ['买入', '加仓', '减仓', '清仓'];
+  $('#dk-journal').innerHTML = `${j.lessons.length ? j.lessons.map(x => `<div class="dk-adv" style="border-color:var(--up)">⚠ ${esc(x)}</div>`).join('') : ''}
+    <div class="dk-form">
+      <input id="dk-j-date" type="date" value="${(DK.data && DK.data.market && DK.data.market.date) || ''}"><input id="dk-j-code" placeholder="代码或名称" style="width:110px">
+      <select id="dk-j-act">${acts.map(a => `<option>${a}</option>`).join('')}</select>
+      <input id="dk-j-price" type="number" step="0.01" placeholder="成交价" style="width:80px"><input id="dk-j-pos" type="number" placeholder="仓位%" style="width:70px">
+      <input id="dk-j-reason" placeholder="理由：按哪条规则？还是临时起意？" style="width:280px">
+      <button class="primary" id="dk-j-add">记一笔</button><span id="dk-j-msg" class="muted"></span></div>
+    ${j.stats.length ? `<table class="grid" style="margin-top:8px"><thead><tr><th class="l">操作</th><th class="l">当天判断</th><th>次数</th><th>做对率</th><th>5日后平均涨跌</th></tr></thead><tbody>
+      ${j.stats.map(s => `<tr><td class="l">${s.side}</td><td class="l">${dkB(s.verdict)}</td><td>${s.n}</td><td>${pct(s.rate, 0)}</td><td>${pct(s.r5, 1)}</td></tr>`).join('')}</tbody></table>
+      <div class="muted" style="font-size:12px">做对 = 买/加之后 5 天是涨的；减/清之后 5 天是跌的（没卖飞）。</div>` : ''}
+    <table class="grid" style="margin-top:8px"><thead><tr><th class="l">日期</th><th class="l">股票</th><th class="l">操作</th><th>价格</th><th>仓位</th><th class="l">当时</th><th class="l">理由</th><th>1日</th><th>3日</th><th>5日</th><th class="l">事后看</th><th></th></tr></thead><tbody>
+    ${j.rows.map(r => `<tr><td class="l">${r.date}</td><td class="l">${esc(r.name)}</td><td class="l">${r.action}</td><td>${num(r.price)}</td><td>${r.position == null ? '-' : r.position + '%'}</td>
+      <td class="l">${phaseTag(r.phase)} ${dkB(r.verdict)}</td><td class="l dk-why">${esc(r.reason || '')}</td><td>${pct(r.r1, 1)}</td><td>${pct(r.r3, 1)}</td><td>${pct(r.r5, 1)}</td>
+      <td class="l">${r.right == null ? '<span class="muted">待观察</span>' : r.right ? '<span class="dk-b go">做对</span>' : `<span class="dk-b stop">${['买入', '加仓'].includes(r.action) ? '买早/买错' : '卖飞'}</span>`}</td>
+      <td><button class="dk-jdel" data-id="${r.id}">删除</button></td></tr>`).join('') || '<tr><td colspan="12" class="l muted">还没有记录</td></tr>'}</tbody></table>`;
+  $('#dk-j-add').onclick = async () => {
+    try {
+      await api('/api/decision/journal', { date: $('#dk-j-date').value, code: $('#dk-j-code').value, action: $('#dk-j-act').value,
+        price: $('#dk-j-price').value, position: $('#dk-j-pos').value, reason: $('#dk-j-reason').value });
+      loadJournal();
+    } catch (e) { $('#dk-j-msg').textContent = e.message; }
+  };
+  document.querySelectorAll('#dk-journal .dk-jdel').forEach(b => b.onclick = async () => { await api('/api/decision/journal/delete', { id: b.dataset.id }); loadJournal(); });
+}
+$('#dk-rules').innerHTML = `
+  <h5>一、开仓顺序</h5><ul><li>先看指数：站上20日线且20日线向上才放开仓位；跌破且向下不开新仓；大跌当天不追。</li>
+  <li>再看情绪周期：主升可重仓，高位震荡、低位试错半仓，主跌两成以下或空仓。仓位跟着阶段走，不跟着当天涨跌走。</li>
+  <li>最后看题材走到哪一段：龙 → 补 → 切 → 空。只在龙头期开仓。</li></ul>
+  <h5>二、题材周期（龙补切空）</h5><ul><li>龙头期：龙头率先上涨，做龙头和核心；分歧日不加，弱转强再买。</li>
+  <li>补涨期：资金切到低位补涨，是鱼尾行情。不开新仓，龙头和中军逢高减，补涨次日不板就走。</li>
+  <li>滞涨退潮：龙头断板大面、涨停数萎缩、跌停出现。清仓，老题材反弹多是诱多。</li>
+  <li>空仓等待：等下一个主升题材，新题材要和老题材逻辑不同。</li></ul>
+  <h5>三、分歧还是退潮（看板块）</h5><ul><li>分歧：龙头和前排抗跌或回封，跌停不扩散，昨日涨停仍有溢价，高度保持。可以等机会。</li>
+  <li>退潮：前排被杀、大面，跌停一天比一天多，打板亏钱，高度被压缩。不加仓，按止损走。</li></ul>
+  <h5>四、买点</h5><ul><li>不在跌的时候加，在止跌确认后加：下跌后，龙头率先翻红或回封、昨日涨停有溢价、跌停明显减少（弱转强）。</li>
+  <li>换强在分歧日选：板块回落时谁跌得最少、最先翻红，谁就是资金最认的。</li>
+  <li>单吊四条：主线、主升期、龙头或强势中军、分歧日抗跌。四条都满足才单吊，三条半仓，补涨不单吊。</li>
+  <li>位置：优先刚突破前高或第一次回踩5日、10日线企稳的；离5日线太远、带长上影的不追。</li></ul>
+  <h5>五、卖点（分层）</h5><ul><li>硬止损：破止损价、放量大阴，当天走。</li><li>趋势：跌破5日线两天收不回，走；首日跌破先警告。</li>
+  <li>同批对比：同批启动的票创新高，它卡在前高、连续长上影，不等破线先走。</li>
+  <li>相对走弱：板块大涨它不涨，减半；连续两天，清仓。补涨：次日不板就走。</li>
+  <li>割肉在第一个信号出现时执行；已经错过、又碰上恐慌冰点时，不在尾盘砍，等反抽再减。</li></ul>
+  <h5>六、纪律</h5><ul><li>每天盘前写三行：阶段、仓位上限、加减仓信号。盘中只按这三行做。</li><li>每笔都记日志，攒到二三十笔，看自己在哪种情况下最容易错。</li></ul>`;
+$('#dk-run').onclick = runDecision;
+$('#dk-date').onchange = runDecision;
+pages.decision = { show() { if (!DK.data) runDecision(); } };
+
 // ------------------------------------------------------------ 连板天梯
 const LD = { data: null, theme: null, kind: 'zt' };
 const TCOLORS = ['#ff6b5f', '#ff8f3f', '#f2b134', '#e05db5', '#b57bff', '#5b8cff', '#36b3e0', '#2fc4a0', '#8bc34a', '#f06292', '#a1887f', '#7986cb'];
@@ -645,6 +784,7 @@ pages.data = { show: refreshData };
   const yearsAgo = (n) => { const d = new Date(last); d.setFullYear(d.getFullYear() - n); return d.toISOString().slice(0, 10); };
   $('#sel-date').value = last;
   $('#em-date').value = last;
+  $('#dk-date').value = last;
   $('#va-start').value = yearsAgo(2); $('#va-end').value = last;
   $('#bt-start').value = yearsAgo(3); $('#bt-end').value = last;
   $('#rp-start').value = yearsAgo(1);
@@ -652,5 +792,5 @@ pages.data = { show: refreshData };
   if (!s || !s.signals) {
     document.querySelector('#nav a[data-page=data]').click();
     $('#dt-log').textContent = '本地还没有数据。点击“更新行情 + 重算信号”开始首次下载（约 20–40 分钟）。';
-  } else runSelect();
+  } else document.querySelector('#nav a[data-page=decision]').click();
 })();

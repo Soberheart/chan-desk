@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 
 from . import db
-from .settings import BENCHMARK, DATA_START, DOWNLOAD_WORKERS, MOCK
+from .settings import BENCHMARK, DATA_START, DOWNLOAD_WORKERS, MARKET_INDEXES, MOCK
 
 BOARD_PREFIX = ("sh.60", "sh.68", "sz.00", "sz.30")
 DAY_FIELDS = "date,open,high,low,close,volume,amount,turn,tradestatus,isST,pctChg"
@@ -298,6 +298,16 @@ def update_market(progress=lambda *a, **k: None, end=None):
         c.executemany("INSERT OR REPLACE INTO index_d VALUES(?,?,?,?,?,?)",
                       [(BENCHMARK, r.date, r.open, r.high, r.low, r.close) for r in idx.itertuples()])
         c.executemany("INSERT OR IGNORE INTO trade_days VALUES(?)", [(d,) for d in idx["date"]])
+    for icode in MARKET_INDEXES:          # 决策台的指数过滤；失败不影响其余步骤
+        if icode == BENCHMARK:
+            continue
+        try:
+            ix = fetch_daily(icode, DATA_START, end, index=True)
+            with db.session() as c:
+                c.executemany("INSERT OR REPLACE INTO index_d VALUES(?,?,?,?,?,?)",
+                              [(icode, r.date, r.open, r.high, r.low, r.close) for r in ix.itertuples()])
+        except Exception as e:  # noqa
+            progress("stage", f"指数 {icode} 下载失败：{e}")
     latest_day = idx["date"].max() if not idx.empty else end
 
     codes = [code for code, _, _ in lst]

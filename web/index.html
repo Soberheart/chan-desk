@@ -11,6 +11,7 @@
 <header>
   <div class="brand">缠论复盘选股台 <span class="sub">chan.py · baostock · 情绪周期</span></div>
   <nav id="nav">
+    <a data-page="decision">决策台</a>
     <a data-page="select" class="active">选股台</a>
     <a data-page="emotion">水温·情绪</a>
     <a data-page="ladder">连板天梯</a>
@@ -66,6 +67,27 @@
     <div class="section"><h4>连板梯队</h4><div id="em-ladder"></div></div>
     <div class="section"><h4>题材热度 <span class="muted" style="font-weight:400;font-size:12px" id="em-tsrc"></span></h4><div class="tablewrap" style="max-height:460px"><table class="grid" id="em-themes"></table></div></div>
   </div>
+</section>
+
+<!-- 决策台 -->
+<section id="page-decision" class="page">
+  <div class="toolbar">
+    <label>日期 <input type="date" id="dk-date"></label>
+    <label>关注题材 <input id="dk-themes" placeholder="如：机器人,AI算力（可空）" style="width:220px"></label>
+    <button id="dk-run" class="primary">刷新</button>
+    <span class="hint" style="margin:0">按92科比：先看指数能不能开仓，再看情绪周期，再看题材走到“龙→补→切→空”哪一段。全部基于收盘数据，用于盘后复盘、盘前计划。</span>
+  </div>
+  <div id="dk-msg" class="hint"></div>
+  <div class="dk-top">
+    <div class="section" id="dk-index"></div>
+    <div class="section" id="dk-market"></div>
+  </div>
+  <div class="section"><h4>题材周期 <span class="muted dk-sub">龙头期做龙头 → 补涨期不开新仓、准备撤 → 滞涨退潮清仓 → 空仓等下一个主升题材</span></h4><div id="dk-theme"></div></div>
+  <div class="section"><h4>盘前三行计划 <span class="muted dk-sub">盘中只按这三行执行，临时冒出的想法不做</span></h4><div id="dk-plan"></div></div>
+  <div class="section"><h4>持仓检查 <span class="muted dk-sub">每只持仓逐条对照卖点规则</span></h4><div id="dk-hold"></div></div>
+  <div class="section"><h4>换强候选 <span class="muted dk-sub">主线题材里位置合适的票，按“单吊四条”打勾；分歧日最抗跌的优先</span></h4><div id="dk-cand"></div></div>
+  <div class="section"><h4>交易日志 <span class="muted dk-sub">记下每次买卖，自动带上当时的阶段和判断，5 天后看对错</span></h4><div id="dk-journal"></div></div>
+  <details class="section dk-rules"><summary><b>我的规则（92科比）</b></summary><div id="dk-rules"></div></details>
 </section>
 
 <!-- 连板天梯 -->

@@ -10,7 +10,7 @@ from collections import OrderedDict
 
 from flask import Flask, jsonify, request, send_from_directory
 
-from . import analytics, datafeed, db, emotion, ladder
+from . import analytics, datafeed, db, decision, emotion, ladder
 from .chan_engine import Stepper, new_chan, serialize, make_klu, serialize_level, LEVELS
 from .settings import LOG_PATH, MOCK, PROGRESS_PATH, ROOT, WEB_DIR
 
@@ -118,6 +118,58 @@ def api_select():
                            boards=_list(a.get("boards")), exclude_st=a.get("exclude_st", "1") == "1",
                            gate=a.get("gate") == "1")
     return ok(res)
+
+
+# ---------------------------------------------------------------- 决策台
+@app.get("/api/decision")
+def api_decision():
+    res = decision.overview(request.args.get("date") or None, _list(request.args.get("themes")) or ())
+    if not res["market"]:
+        return err("还没有情绪周期数据，请先到「数据」页更新")
+    return ok(res)
+
+
+@app.post("/api/decision/holding")
+def api_holding_save():
+    try:
+        return ok(decision.holding_save(_args()))
+    except ValueError as e:
+        return err(str(e))
+
+
+@app.post("/api/decision/holding/delete")
+def api_holding_delete():
+    decision.holding_delete(_args().get("code"))
+    return ok()
+
+
+@app.post("/api/decision/plan")
+def api_plan_save():
+    a = _args()
+    if not a.get("date"):
+        return err("缺少日期")
+    decision.plan_save(a)
+    return ok(decision.plan_get(a["date"]))
+
+
+@app.get("/api/decision/journal")
+def api_journal():
+    return ok(decision.journal())
+
+
+@app.post("/api/decision/journal")
+def api_journal_add():
+    try:
+        decision.journal_add(_args())
+    except (ValueError, KeyError, TypeError) as e:
+        return err(f"记录失败：{e}")
+    return ok(decision.journal())
+
+
+@app.post("/api/decision/journal/delete")
+def api_journal_delete():
+    decision.journal_delete(_args().get("id"))
+    return ok(decision.journal())
 
 
 # ---------------------------------------------------------------- 连板天梯

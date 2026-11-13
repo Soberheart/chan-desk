@@ -58,6 +58,17 @@ CREATE TABLE IF NOT EXISTS ladder(
     date TEXT, code TEXT, kind TEXT, board INTEGER, theme TEXT, tags TEXT, prob REAL, why TEXT,
     nxt_zt INTEGER, nxt_pct REAL, dab_ret REAL, PRIMARY KEY(date, code)
 ) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS dk_holdings(
+    code TEXT PRIMARY KEY, cost REAL, buy_date TEXT, position REAL, role TEXT, stop REAL, peers TEXT, theme TEXT,
+    note TEXT, updated TEXT
+);
+CREATE TABLE IF NOT EXISTS dk_plan(
+    date TEXT PRIMARY KEY, phase TEXT, cap TEXT, add_signal TEXT, cut_signal TEXT, note TEXT, updated TEXT
+);
+CREATE TABLE IF NOT EXISTS dk_journal(
+    id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, code TEXT, action TEXT, price REAL, position REAL,
+    reason TEXT, phase TEXT, temp REAL, verdict TEXT, created TEXT
+);
 CREATE TABLE IF NOT EXISTS sig_emo(
     code TEXT, date TEXT, phase TEXT, theme TEXT, theme_old INTEGER, theme_new INTEGER,
     hyped INTEGER, maxb5 INTEGER, PRIMARY KEY(code, date)

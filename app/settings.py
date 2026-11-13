@@ -23,6 +23,8 @@ DATA_START = os.environ.get("CHAN_DESK_START", "2019-01-01")
 SIGNAL_START = os.environ.get("CHAN_DESK_SIGNAL_START", "2020-01-01")
 
 BENCHMARK = "sh.000300"          # 沪深300 作为基准
+# 决策台用来判断“是否适合开仓”的指数（第一个是主看）
+MARKET_INDEXES = {"sh.000001": "上证指数", "sz.399006": "创业板指", "sh.000300": "沪深300"}
 DOWNLOAD_WORKERS = int(os.environ.get("CHAN_DESK_DL_WORKERS", 5))  # baostock 下载进程数（太多容易被限流卡住）
 SCAN_WORKERS = max(1, (os.cpu_count() or 4) - 1)  # 信号计算进程数
 MIN_BARS = 120                   # 上市不足该K线数的股票不参与选股
